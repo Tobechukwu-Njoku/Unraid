@@ -13,7 +13,7 @@ PATH_SHARE_ARRAY="/mnt/user0/$SHARE_NAME"           # Source (only from array)
 PATH_SHARE_CACHE="/mnt/$CACHE_NAME/$SHARE_NAME"     # Destination (cache disk)
 
 # Count files under $SIZE_LIMIT before processing
-echo "Counting files under $SIZE_LIMIT in /mnt/user0/..."
+echo "Counting files under $SIZE_LIMIT in $SHARE_NAME"
 file_count_array=$(find $PATH_SHARE_ARRAY -type f -size $SIZE_LIMIT | wc -l)
 file_count_cache=$(find $PATH_SHARE_CACHE -type f -size $SIZE_LIMIT | wc -l)
 echo "$SHARE_NAME Array: $file_count_array files under $SIZE_LIMIT"
