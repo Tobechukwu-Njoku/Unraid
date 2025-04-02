@@ -1,14 +1,14 @@
 #!/bin/bash
 #description=This script pulls small files from the array into your selected cache pool
 #arrayStarted=true
-#name=cache_small_files
+#name=atomic_read_cache
 
 #author=Tobechukwu Njoku
 #date=2025-04-01
-#version=0.2
+#version=0.2.0
 #license=MIT
 #--------------------------------------------------------------------------------------------------------------------------------
-# This script is designed to move small files from an array share to a cache share
+# This script is designed to move small files to the cache pool of an array backed share
 # It dynamically generates size thresholds based on user-defined parameters
 # It counts the number of files in each size range and displays the results in a table format
 # It also provides a dry run option to preview the files that would be moved
