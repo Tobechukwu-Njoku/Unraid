@@ -5,7 +5,7 @@
 
 #author=Tobechukwu Njoku
 #date=2025-04-01
-#version=0.2.0
+#version=0.2.1
 #license=MIT
 #--------------------------------------------------------------------------------------------------------------------------------
 # This script is designed to move small files to the cache pool of an array backed share
@@ -24,7 +24,6 @@
 #Tofix:
 # - Fix how the table is displayed
 # - Fix that the table shows MB instead of changing to GB
-# - Fix how total is calculated
 
 # Configuration
 SHARE_NAME="Test-Share" # Set the name of your share here
