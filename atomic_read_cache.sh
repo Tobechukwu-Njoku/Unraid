@@ -22,7 +22,6 @@
 # - Add a feature to exclude certain file types from being moved
 
 #Tofix:
-# - Fix SIZE_LIMIT & START_SIZE do the same thing
 # - Fix how the table is displayed
 # - Fix that the table shows MB instead of changing to GB
 # - Fix how total is calculated
@@ -30,7 +29,6 @@
 # Configuration
 SHARE_NAME="Test-Share" # Set the name of your share here
 CACHE_NAME="xray"       # Set the name of your cache here
-SIZE_LIMIT="256M"       # Set size limit (e.g., 10M for 10MB)
 DRY_RUN=true            # Set to true for a dry run
 
 START_SIZE=512          # Initial size threshold in megabytes (numeric only)
@@ -115,7 +113,7 @@ move_files() {
         echo "Would Move: $src_file -> $dest_path"
     else
         mv "$src_file" "$dest_path"
-        # This uses a lot of CPU time
+        # This uses a lot of CPU time consider disabling for actual use
         echo "Moved: $src_file -> $dest_path"
     fi
 }
@@ -124,6 +122,6 @@ export -f move_files
 export PATH_SHARE_ARRAY PATH_SHARE_CACHE DRY_RUN
 
 # Find and process files smaller than the specified size
-find "$PATH_SHARE_ARRAY" -type f -size -"$SIZE_LIMIT" -print0 | while IFS= read -r -d '' file; do
+find "$PATH_SHARE_ARRAY" -type f -size -"$START_SIZE"M -print0 | while IFS= read -r -d '' file; do
     move_files "$file"
 done
