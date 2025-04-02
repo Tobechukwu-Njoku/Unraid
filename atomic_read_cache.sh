@@ -31,8 +31,8 @@ SHARE_NAME="Test-Share" # Set the name of your share here
 CACHE_NAME="xray"       # Set the name of your cache here
 DRY_RUN=true            # Set to true for a dry run
 
-START_SIZE=512          # Initial size threshold in megabytes (numeric only)
-SIZE_MULTIPLIER=4       # Multiplier for size increases (8M, 16M, 32M, etc)
+START_SIZE=64          # Initial size threshold in megabytes (numeric only)
+SIZE_MULTIPLIER=2       # Multiplier for size increases (8M, 16M, 32M, etc)
 ITERATIONS=8            # Number of iterations for size thresholds
 
 # Declare environment variables
@@ -54,19 +54,18 @@ for ((i = 1; i < ITERATIONS; i++)); do
 done
 
 # Count files for each size range
-for ((i = 0; i < ITERATIONS; i++)); do
+for ((i = 0; i < ITERATIONS-1; i++)); do
     lower_size=${size_thresholds[$i]}
 
     if [[ $i -eq 0 ]]; then
         # First range: Files smaller than START_SIZE
         file_count_array["sub${lower_size}"]=$(find "$PATH_SHARE_ARRAY" -type f -size -"${lower_size}c" | wc -l)
         file_count_cache["sub${lower_size}"]=$(find "$PATH_SHARE_CACHE" -type f -size -"${lower_size}c" | wc -l)
-        echo "lower_size is " $lower_size
     else
+        # Looped range: Files between size thresholds
         upper_size=${size_thresholds[$i+1]}
         file_count_array["sub${upper_size}"]=$(find "$PATH_SHARE_ARRAY" -type f -size +"${lower_size}c" -size -"${upper_size}c" | wc -l)
         file_count_cache["sub${upper_size}"]=$(find "$PATH_SHARE_CACHE" -type f -size +"${lower_size}c" -size -"${upper_size}c" | wc -l)
-        echo "lower_size is " $lower_size " upper_size is " $upper_size
     fi
 done
 
@@ -76,9 +75,9 @@ file_count_array["super${final_threshold}"]=$(find "$PATH_SHARE_ARRAY" -type f -
 file_count_cache["super${final_threshold}"]=$(find "$PATH_SHARE_CACHE" -type f -size +"${final_threshold}c" | wc -l)
 
 # Display results in table format
-echo "----------------------------------------"
+echo "--------------------------------------"
 printf "| %-10s | %-20s | %-20s | %-20s |\n" "Size" "Array" "Cache: $CACHE_NAME" "Total"
-echo "----------------------------------------"
+echo "--------------------------------------"
 
 for ((i = 0; i < ITERATIONS; i++)); do
     size_label="<$((${size_thresholds[$i]} / 1024 / 1024))M"
@@ -96,7 +95,7 @@ cache_count=${file_count_cache["super${final_threshold}"]}
 total_count=$((array_count + cache_count))
 
 printf "| %-10s | %-20s | %-20s | %-20s |\n" "$size_label" "$array_count" "$cache_count" "$total_count"
-echo "----------------------------------------"
+echo "--------------------------------------"
 #--------------------------------------------------------------------------------------------------------------------------------
 
 # Function to move files while preserving directory structure
