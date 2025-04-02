@@ -76,9 +76,9 @@ file_count_array["super${final_threshold}"]=$(find "$PATH_SHARE_ARRAY" -type f -
 file_count_cache["super${final_threshold}"]=$(find "$PATH_SHARE_CACHE" -type f -size +"${final_threshold}c" | wc -l)
 
 # Display results in table format
-echo "-------------------------------------"
+echo "----------------------------------------"
 printf "| %-10s | %-20s | %-20s | %-20s |\n" "Size" "Array" "Cache: $CACHE_NAME" "Total"
-echo "-------------------------------------"
+echo "----------------------------------------"
 
 for ((i = 0; i < ITERATIONS; i++)); do
     size_label="<$((${size_thresholds[$i]} / 1024 / 1024))M"
@@ -96,7 +96,7 @@ cache_count=${file_count_cache["super${final_threshold}"]}
 total_count=$((array_count + cache_count))
 
 printf "| %-10s | %-20s | %-20s | %-20s |\n" "$size_label" "$array_count" "$cache_count" "$total_count"
-echo "-------------------------------------"
+echo "----------------------------------------"
 #--------------------------------------------------------------------------------------------------------------------------------
 
 # Function to move files while preserving directory structure
@@ -110,11 +110,13 @@ move_files() {
 
     if [ "$DRY_RUN" = true ]; then
         # This uses a lot of CPU time
-        echo "Would Move: $src_file -> $dest_path"
+        #echo "Would Move: $src_file -> $dest_path"
+        # Shorten the output for readability
+        echo "Would Move: $src_file"
     else
         mv "$src_file" "$dest_path"
         # This uses a lot of CPU time consider disabling for actual use
-        echo "Moved: $src_file -> $dest_path"
+        #echo "Moved: $src_file -> $dest_path"
     fi
 }
 
