@@ -5,7 +5,7 @@
 
 #author=Tobechukwu Njoku
 #date=2025-04-03
-#version=1.0.0
+#version=1.0.1
 #license=MIT
 #--------------------------------------------------------------------------------------------------------------------------------
 # This script is designed to move small files to the cache pool of an array backed share
@@ -104,13 +104,18 @@ move_files() {
     local relative_path="${src_file#$PATH_SHARE_ARRAY/}"
     local dest_path="$PATH_SHARE_CACHE/$relative_path"
 
-    # Ensure the directory exists: Slower but safer, multiple system calls
-    mkdir -p "$(dirname "$dest_path")"
+    mkdir -p "$(dirname "$dest_path")" || {
+        echo "Error: Failed to create directory for $dest_path"
+        return 1
+    }
 
     if [ "$DRY_RUN" = true ]; then
         echo "Would Move: $src_file"
     else
-        mv "$src_file" "$dest_path"
+        mv "$src_file" "$dest_path" || {
+            echo "Error: Failed to move $src_file to $dest_path"
+            return 1
+        }
     fi
 }
 
