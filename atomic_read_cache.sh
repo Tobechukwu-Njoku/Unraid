@@ -28,6 +28,7 @@
 SHARE_NAME="Test-Share" # Set the name of your share here
 CACHE_NAME="xray"       # Set the name of your cache here
 DRY_RUN=true            # Set to true for a dry run
+PATHS_EXIST=false       # Set to true if the paths exist
 
 START_SIZE=64           # Initial size threshold in megabytes (numeric only)
 SIZE_MULTIPLIER=2       # Multiplier for size increases (e.g., 64M, 128M, etc.)
@@ -117,7 +118,7 @@ move_files() {
 }
 
 # Function to process files smaller than the specified size
-process_files() {
+safety_checks() {
     export -f move_files
     export PATH_SHARE_ARRAY PATH_SHARE_CACHE DRY_RUN
 
@@ -125,11 +126,7 @@ process_files() {
     echo "Check 01 Passed: Directory exists on array."
         if [ -d $PATH_SHARE_CACHE ]; then
         echo -e "Check 02 Passed: Directory exists on cache.\n"
-        echo "Moving files smaller than $START_SIZE MB from '$PATH_SHARE_ARRAY' to '$PATH_SHARE_CACHE'"
-        echo -e "Cache conquest in progress... Stand ready for it's completion!\n"
-        find "$PATH_SHARE_ARRAY" -type f -size -"$START_SIZE"M -print0 | while IFS= read -r -d '' file; do
-            move_files "$file"
-        done
+        PATHS_EXIST=true
         else
             echo "Check 02 Failed: Directory "$PATH_SHARE_CACHE" does not exist on cache."
         fi
@@ -138,8 +135,25 @@ process_files() {
     fi
 }
 
+process_files() {
+    echo "Moving files smaller than $START_SIZE MB from '$PATH_SHARE_ARRAY' to '$PATH_SHARE_CACHE'"
+    echo -e "Cache conquest in progress... Stand ready for it's completion!\n"
+    find "$PATH_SHARE_ARRAY" -type f -size -"$START_SIZE"M -print0 | while IFS= read -r -d '' file; do
+        move_files "$file"
+    done
+}
+
+task_execution() {
+    safety_checks
+    if $PATHS_EXIST; then
+        generate_size_thresholds
+        count_files
+        display_results
+        process_files
+    else
+        echo "Error: One or more paths do not exist. Please check the configuration."
+    fi
+}
+
 # Main script execution
-generate_size_thresholds
-count_files
-display_results
-process_files
+task_execution
