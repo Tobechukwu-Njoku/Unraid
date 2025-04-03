@@ -31,29 +31,29 @@ DRY_RUN=true            # Set to true for a dry run
 START_SIZE=64           # Initial size threshold in megabytes (numeric only)
 SIZE_MULTIPLIER=2       # Multiplier for size increases (e.g., 64M, 128M, etc.)
 ITERATIONS=8            # Number of iterations for size thresholds
-PATHS_EXIST=false       # Set to true if the paths exist
+VALID_PATHS=false       # Set to true if the paths exist
 PATH_SHARE_ARRAY="/mnt/user0/$SHARE_NAME"           # Source (only from array)
 PATH_SHARE_CACHE="/mnt/$CACHE_NAME/$SHARE_NAME"     # Destination (cache disk)
 
 # Declare arrays to store results
 declare -A file_count_array
 declare -A file_count_cache
-size_thresholds=()
+size_thresholds_bytes=()
 
 # Function to generate size thresholds
-generate_size_thresholds() {
-    size_thresholds[0]=$((START_SIZE * 1024 * 1024))  # Convert START_SIZE to bytes
+generate_size_thresholds_bytes() {
+    size_thresholds_bytes[0]=$((START_SIZE * 1024 * 1024))  # Convert START_SIZE to bytes
     for ((i = 1; i < ITERATIONS; i++)); do
-        prev_size=${size_thresholds[$((i-1))]}
+        prev_size=${size_thresholds_bytes[$((i-1))]}
         next_size=$((prev_size * SIZE_MULTIPLIER))
-        size_thresholds[i]=$next_size  # Store size in bytes
+        size_thresholds_bytes[i]=$next_size  # Store size in bytes
     done
 }
 
 # Function to count files for each size range
 count_files() {
     for ((i = 0; i < ITERATIONS-1; i++)); do
-        lower_size=${size_thresholds[$i]}
+        lower_size=${size_thresholds_bytes[$i]}
 
         if [[ $i -eq 0 ]]; then
             # First range: Files smaller than START_SIZE
@@ -61,14 +61,14 @@ count_files() {
             file_count_cache["sub${lower_size}"]=$(find "$PATH_SHARE_CACHE" -type f -size -"${lower_size}c" | wc -l)
         else
             # Looped range: Files between size thresholds
-            upper_size=${size_thresholds[$i+1]}
+            upper_size=${size_thresholds_bytes[$i+1]}
             file_count_array["sub${upper_size}"]=$(find "$PATH_SHARE_ARRAY" -type f -size +"${lower_size}c" -size -"${upper_size}c" | wc -l)
             file_count_cache["sub${upper_size}"]=$(find "$PATH_SHARE_CACHE" -type f -size +"${lower_size}c" -size -"${upper_size}c" | wc -l)
         fi
     done
 
     # Count files larger than the last threshold
-    final_threshold=${size_thresholds[$((ITERATIONS-1))]}
+    final_threshold=${size_thresholds_bytes[$((ITERATIONS-1))]}
     file_count_array["super${final_threshold}"]=$(find "$PATH_SHARE_ARRAY" -type f -size +"${final_threshold}c" | wc -l)
     file_count_cache["super${final_threshold}"]=$(find "$PATH_SHARE_CACHE" -type f -size +"${final_threshold}c" | wc -l)
 }
@@ -80,9 +80,9 @@ display_results() {
     echo "--------------------------------------"
 
     for ((i = 0; i < ITERATIONS; i++)); do
-        size_label="<$((${size_thresholds[$i]} / 1024 / 1024))M"
-        array_count=${file_count_array["sub${size_thresholds[$i]}"]}
-        cache_count=${file_count_cache["sub${size_thresholds[$i]}"]}
+        size_label="<$((${size_thresholds_bytes[$i]} / 1024 / 1024))M"
+        array_count=${file_count_array["sub${size_thresholds_bytes[$i]}"]}
+        cache_count=${file_count_cache["sub${size_thresholds_bytes[$i]}"]}
         total_count=$((array_count + cache_count))
 
         printf "| %-10s | %-15s | %-15s | %-16s |\n" "$size_label" "$array_count" "$cache_count" "$total_count"
@@ -128,7 +128,7 @@ safety_checks() {
     echo "Check 01 Passed: Directory exists on array."
         if [ -d $PATH_SHARE_CACHE ]; then
         echo -e "Check 02 Passed: Directory exists on cache.\n"
-        PATHS_EXIST=true
+        VALID_PATHS=true
         else
             echo "Check 02 Failed: Directory "$PATH_SHARE_CACHE" does not exist on cache."
         fi
@@ -147,8 +147,8 @@ process_files() {
 
 task_execution() {
     safety_checks
-    if $PATHS_EXIST; then
-        generate_size_thresholds
+    if $VALID_PATHS; then
+        generate_size_thresholds_bytes
         count_files
         display_results
         process_files
