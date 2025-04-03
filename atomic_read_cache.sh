@@ -4,8 +4,8 @@
 #name=atomic_read_cache
 
 #author=Tobechukwu Njoku
-#date=2025-04-01
-#version=0.2.1
+#date=2025-04-03
+#version=1.0.0
 #license=MIT
 #--------------------------------------------------------------------------------------------------------------------------------
 # This script is designed to move small files to the cache pool of an array backed share
@@ -27,12 +27,11 @@ SHARE_NAME="Test-Share" # Set the name of your share here
 CACHE_NAME="xray"       # Set the name of your cache here
 DRY_RUN=true            # Set to true for a dry run
 
+# Declare environment variables
 START_SIZE=64           # Initial size threshold in megabytes (numeric only)
 SIZE_MULTIPLIER=2       # Multiplier for size increases (e.g., 64M, 128M, etc.)
 ITERATIONS=8            # Number of iterations for size thresholds
 PATHS_EXIST=false       # Set to true if the paths exist
-
-# Declare environment variables
 PATH_SHARE_ARRAY="/mnt/user0/$SHARE_NAME"           # Source (only from array)
 PATH_SHARE_CACHE="/mnt/$CACHE_NAME/$SHARE_NAME"     # Destination (cache disk)
 
@@ -148,6 +147,11 @@ task_execution() {
         count_files
         display_results
         process_files
+        if $DRY_RUN; then
+            echo -e "\nDry run completed. No files were moved."
+        else
+            echo -e "\nFiles moved successfully."
+        fi
     else
         echo "Error: One or more paths do not exist. Please check the configuration."
     fi
