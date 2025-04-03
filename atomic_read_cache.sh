@@ -9,17 +9,15 @@
 #license=MIT
 #--------------------------------------------------------------------------------------------------------------------------------
 # This script is designed to move small files to the cache pool of an array backed share
-# It dynamically generates size thresholds based on user-defined parameters
-# It counts the number of files in each size range and displays the results in a table format
+# It counts the number of files in each size range and displays the results in a table format (size thresholds)
+# These size thresholds are dynamically generated based on user-defined parameters
 # It also provides a dry run option to preview the files that would be moved
 # before actually moving them
 #--------------------------------------------------------------------------------------------------------------------------------
 
 #Todo:
-# - Add error handling for invalid cache & array paths
 # - Add a cleanup option to remove empty directories after moving files
 # - Add a progress indicator for long-running operations without using a lot of CPU time
-# - Add a feature to exclude certain file types from being moved
 
 #Tofix:
 # - Fix that the table shows MB instead of changing to GB
@@ -28,11 +26,11 @@
 SHARE_NAME="Test-Share" # Set the name of your share here
 CACHE_NAME="xray"       # Set the name of your cache here
 DRY_RUN=true            # Set to true for a dry run
-PATHS_EXIST=false       # Set to true if the paths exist
 
 START_SIZE=64           # Initial size threshold in megabytes (numeric only)
 SIZE_MULTIPLIER=2       # Multiplier for size increases (e.g., 64M, 128M, etc.)
 ITERATIONS=8            # Number of iterations for size thresholds
+PATHS_EXIST=false       # Set to true if the paths exist
 
 # Declare environment variables
 PATH_SHARE_ARRAY="/mnt/user0/$SHARE_NAME"           # Source (only from array)
