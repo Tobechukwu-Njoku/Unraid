@@ -22,7 +22,6 @@
 # - Add a feature to exclude certain file types from being moved
 
 #Tofix:
-# - Fix how the table is displayed
 # - Fix that the table shows MB instead of changing to GB
 
 # Configuration
@@ -38,7 +37,6 @@ ITERATIONS=8            # Number of iterations for size thresholds
 PATH_SHARE_ARRAY="/mnt/user0/$SHARE_NAME"           # Source (only from array)
 PATH_SHARE_CACHE="/mnt/$CACHE_NAME/$SHARE_NAME"     # Destination (cache disk)
 
-#--------------------------------------------------------------------------------------------------------------------------------
 # Declare arrays to store results
 declare -A file_count_array
 declare -A file_count_cache
@@ -123,9 +121,21 @@ process_files() {
     export -f move_files
     export PATH_SHARE_ARRAY PATH_SHARE_CACHE DRY_RUN
 
-    find "$PATH_SHARE_ARRAY" -type f -size -"$START_SIZE"M -print0 | while IFS= read -r -d '' file; do
-        move_files "$file"
-    done
+    if [ -d $PATH_SHARE_ARRAY ]; then
+    echo "Check 01 Passed: Directory exists on array."
+        if [ -d $PATH_SHARE_CACHE ]; then
+        echo -e "Check 02 Passed: Directory exists on cache.\n"
+        echo "Moving files smaller than $START_SIZE MB from '$PATH_SHARE_ARRAY' to '$PATH_SHARE_CACHE'"
+        echo -e "Cache conquest in progress... Stand ready for it's completion!\n"
+        find "$PATH_SHARE_ARRAY" -type f -size -"$START_SIZE"M -print0 | while IFS= read -r -d '' file; do
+            move_files "$file"
+        done
+        else
+            echo "Check 02 Failed: Directory "$PATH_SHARE_CACHE" does not exist on cache."
+        fi
+    else
+        echo "Check 01 Failed: Directory "$PATH_SHARE_ARRAY" does not exist on array."
+    fi
 }
 
 # Main script execution
