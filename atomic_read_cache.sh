@@ -80,7 +80,7 @@ count_files() {
 # Function to display results in a table format
 display_results() {
     echo "--------------------------------------"
-    printf "| %-10s | %-20s | %-20s | %-20s |\n" "Size" "Array" "Cache: $CACHE_NAME" "Total"
+    printf "| %-10s | %-15s | %-15s | %-16s |\n" "Size" "Array" "Cache: $CACHE_NAME" "Total"
     echo "--------------------------------------"
 
     for ((i = 0; i < ITERATIONS; i++)); do
@@ -89,7 +89,7 @@ display_results() {
         cache_count=${file_count_cache["sub${size_thresholds[$i]}"]}
         total_count=$((array_count + cache_count))
 
-        printf "| %-10s | %-20s | %-20s | %-20s |\n" "$size_label" "$array_count" "$cache_count" "$total_count"
+        printf "| %-10s | %-15s | %-15s | %-16s |\n" "$size_label" "$array_count" "$cache_count" "$total_count"
     done
 
     # Print final row for files larger than the last threshold
@@ -98,7 +98,7 @@ display_results() {
     cache_count=${file_count_cache["super${final_threshold}"]}
     total_count=$((array_count + cache_count))
 
-    printf "| %-10s | %-20s | %-20s | %-20s |\n" "$size_label" "$array_count" "$cache_count" "$total_count"
+    printf "| %-10s | %-15s | %-15s | %-16s |\n" "$size_label" "$array_count" "$cache_count" "$total_count"
     echo "--------------------------------------"
 }
 

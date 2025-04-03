@@ -44,7 +44,7 @@ file_count_cache["super$final_threshold"]=$(find "$PATH_SHARE_CACHE" -type f -si
 
 # Display results in table format
 echo "-------------------------------------"
-printf "| %-6s | %-10s | %-10s | %-10s |\n" "Size" "Array" "Cache: $CACHE_NAME" "Total"
+printf "| %-10s | %-10s | %-10s | %-10s |\n" "Size" "Array" "Cache: $CACHE_NAME" "Total"
 echo "-------------------------------------"
 
 for ((i = 0; i < ITERATIONS; i++)); do
@@ -62,5 +62,5 @@ array_count=${file_count_array["super$final_threshold"]}
 cache_count=${file_count_cache["super$final_threshold"]}
 total_count=$((array_count + cache_count))
 
-printf "| %-6s | %-10s | %-10s | %-10s |\n" "$size_label" "$array_count" "$cache_count" "$total_count"
+printf "| %-10s | %-10s | %-10s | %-10s |\n" "$size_label" "$array_count" "$cache_count" "$total_count"
 echo "-------------------------------------"
