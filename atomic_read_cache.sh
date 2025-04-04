@@ -16,7 +16,6 @@
 #--------------------------------------------------------------------------------------------------------------------------------
 
 #Todo:
-# - Add a cleanup option to remove empty directories after moving files
 # - Add a progress indicator for long-running operations without using a lot of CPU time
 
 #Tofix:
@@ -152,6 +151,11 @@ process_files() {
     find "$PATH_SHARE_ARRAY" -type f -size -"$START_SIZE"M -print0 | while IFS= read -r -d '' file; do
         move_files "$file"
     done
+}
+
+cleanup_empty_dirs() {
+    log "Cleaning up empty directories in $PATH_SHARE_ARRAY"
+    find "$PATH_SHARE_ARRAY" -type d -empty -delete || log "Error: Failed to clean up empty directories"
 }
 
 task_execution() {
