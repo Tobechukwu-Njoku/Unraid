@@ -27,9 +27,9 @@ CACHE_NAME="xray"       # Set the name of your cache here
 DRY_RUN=true            # Set to true for a dry run
 
 # Declare environment variables
-START_SIZE=64           # Initial size threshold in megabytes (numeric only)
-SIZE_MULTIPLIER=2       # Multiplier for size increases (e.g., 64M, 128M, etc.)
-ITERATIONS=8            # Number of iterations for size thresholds
+START_SIZE=1           # Initial size threshold in megabytes (numeric only) default 64
+SIZE_MULTIPLIER=2       # Multiplier for size increases (e.g., 64M, 128M, etc.) default 2
+ITERATIONS=8            # Number of iterations for size thresholds default 8
 
 # Don't change the following variables
 VALID_PATHS=false       # Set to true if the paths exist
@@ -81,14 +81,22 @@ count_files() {
     file_count_cache["super${final_threshold}"]=$(find "$PATH_SHARE_CACHE" -type f -size +"${final_threshold}c" | wc -l)
 }
 
-# Function to display results in a table format
+format_size() {
+    local size_bytes=$1
+    if ((size_bytes >= 1024 * 1024 * 1024)); then
+        echo "$((size_bytes / 1024 / 1024 / 1024))G"
+    else ((size_bytes >= 1024 * 1024)); then
+        echo "$((size_bytes / 1024 / 1024))M"
+    fi
+}
+
 display_results() {
     echo "--------------------------------------"
     printf "| %-10s | %-15s | %-15s | %-16s |\n" "Size" "Array" "Cache: $CACHE_NAME" "Total"
     echo "--------------------------------------"
 
     for ((i = 0; i < ITERATIONS; i++)); do
-        size_label="<$((${size_thresholds_bytes[$i]} / 1024 / 1024))M"
+        size_label="<$(format_size ${size_thresholds_bytes[$i]})"
         array_count=${file_count_array["sub${size_thresholds_bytes[$i]}"]}
         cache_count=${file_count_cache["sub${size_thresholds_bytes[$i]}"]}
         total_count=$((array_count + cache_count))
@@ -96,8 +104,7 @@ display_results() {
         printf "| %-10s | %-15s | %-15s | %-16s |\n" "$size_label" "$array_count" "$cache_count" "$total_count"
     done
 
-    # Print final row for files larger than the last threshold
-    size_label=">$((${final_threshold} / 1024 / 1024))M"
+    size_label=">$(format_size ${final_threshold})"
     array_count=${file_count_array["super${final_threshold}"]}
     cache_count=${file_count_cache["super${final_threshold}"]}
     total_count=$((array_count + cache_count))
