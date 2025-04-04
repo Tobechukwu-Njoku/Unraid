@@ -3,7 +3,7 @@
 #arrayStarted=true
 #name=atomic_read_cache
 
-#author=Tobechukwu Njoku
+#author=T. N.
 #date=2025-04-03
 #version=1.0.1
 #license=MIT
@@ -31,6 +31,8 @@ DRY_RUN=true            # Set to true for a dry run
 START_SIZE=64           # Initial size threshold in megabytes (numeric only)
 SIZE_MULTIPLIER=2       # Multiplier for size increases (e.g., 64M, 128M, etc.)
 ITERATIONS=8            # Number of iterations for size thresholds
+
+# Don't change the following variables
 VALID_PATHS=false       # Set to true if the paths exist
 PATH_SHARE_ARRAY="/mnt/user0/$SHARE_NAME"           # Source (only from array)
 PATH_SHARE_CACHE="/mnt/$CACHE_NAME/$SHARE_NAME"     # Destination (cache disk)
@@ -39,6 +41,13 @@ PATH_SHARE_CACHE="/mnt/$CACHE_NAME/$SHARE_NAME"     # Destination (cache disk)
 declare -A file_count_array
 declare -A file_count_cache
 size_thresholds_bytes=()
+
+LOG_FILE="/var/log/atomic_read_cache.log"
+
+
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+}
 
 # Function to generate size thresholds
 generate_size_thresholds_bytes() {
@@ -105,15 +114,15 @@ move_files() {
     local dest_path="$PATH_SHARE_CACHE/$relative_path"
 
     mkdir -p "$(dirname "$dest_path")" || {
-        echo "Error: Failed to create directory for $dest_path"
+        log "Error: Failed to create directory for $dest_path"
         return 1
     }
 
     if [ "$DRY_RUN" = true ]; then
-        echo "Would Move: $src_file"
+        log "Would Move: $src_file"
     else
         mv "$src_file" "$dest_path" || {
-            echo "Error: Failed to move $src_file to $dest_path"
+            log "Error: Failed to move $src_file to $dest_path"
             return 1
         }
     fi
@@ -125,21 +134,21 @@ safety_checks() {
     export PATH_SHARE_ARRAY PATH_SHARE_CACHE DRY_RUN
 
     if [ -d $PATH_SHARE_ARRAY ]; then
-    echo "Check 01 Passed: Directory exists on array."
+        log "Check 01 Passed: Directory exists on array."
         if [ -d $PATH_SHARE_CACHE ]; then
-        echo -e "Check 02 Passed: Directory exists on cache.\n"
-        VALID_PATHS=true
+            log "Check 02 Passed: Directory exists on cache."
+            VALID_PATHS=true
         else
-            echo "Check 02 Failed: Directory "$PATH_SHARE_CACHE" does not exist on cache."
+            log "Check 02 Failed: Directory $PATH_SHARE_CACHE does not exist on cache."
         fi
     else
-        echo "Check 01 Failed: Directory "$PATH_SHARE_ARRAY" does not exist on array."
+        log "Check 01 Failed: Directory $PATH_SHARE_ARRAY does not exist on array."
     fi
 }
 
 process_files() {
-    echo "Moving files smaller than $START_SIZE MB from '$PATH_SHARE_ARRAY' to '$PATH_SHARE_CACHE'"
-    echo -e "Cache conquest in progress... Stand ready for it's completion!\n"
+    log "Moving files smaller than $START_SIZE MB from '$PATH_SHARE_ARRAY' to '$PATH_SHARE_CACHE'"
+    log "Cache conquest in progress... Stand ready for its completion!"
     find "$PATH_SHARE_ARRAY" -type f -size -"$START_SIZE"M -print0 | while IFS= read -r -d '' file; do
         move_files "$file"
     done
@@ -153,12 +162,12 @@ task_execution() {
         display_results
         process_files
         if $DRY_RUN; then
-            echo -e "\nDry run completed. No files were moved."
+            log "Dry run completed. No files were moved."
         else
-            echo -e "\nFiles moved successfully."
+            log "Files moved successfully."
         fi
     else
-        echo "Error: One or more paths do not exist. Please check the configuration."
+        log "Error: One or more paths do not exist. Please check the configuration."
     fi
 }
 
