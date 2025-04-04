@@ -5,7 +5,7 @@
 
 #author=T. N.
 #date=2025-04-03
-#version=1.0.1
+#version=1.1.0
 #license=MIT
 #--------------------------------------------------------------------------------------------------------------------------------
 # This script is designed to move small files to the cache pool of an array backed share
@@ -224,14 +224,12 @@ post_execution_message() {
 
 task_execution() {
     safety_checks
-    if $VALID_PATHS; then
-        generate_size_thresholds
-        count_files
-        display_results
-        process_files
-        cleanup_empty_dirs
-        post_execution_message
-    fi    
+    generate_size_thresholds
+    count_files
+    display_results
+    process_files
+    cleanup_empty_dirs
+    post_execution_message
 }
 
 # Main script execution
