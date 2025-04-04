@@ -5,7 +5,7 @@
 
 #author=T. N.
 #date=2025-04-03
-#version=1.1.0
+#version=1.1.1
 #license=MIT
 #--------------------------------------------------------------------------------------------------------------------------------
 # This script is designed to move small files to the cache pool of an array backed share
@@ -16,10 +16,11 @@
 #--------------------------------------------------------------------------------------------------------------------------------
 
 #Todo:
-# - Add a progress indicator for long-running operations without using a lot of CPU time
+# - Add unit tests
+# - Add trap for cleanup
 
 #Tofix:
-# - Fix that the table shows MB instead of changing to GB
+# - NA
 
 # Configuration
 SHARE_NAME="Test-Share" # Set the name of your share here
@@ -64,7 +65,6 @@ generate_size_thresholds() {
 count_files() {
     for ((i = 0; i < ITERATIONS-1; i++)); do
         lower_size=${size_thresholds_bytes[$i]}
-
         if [[ $i -eq 0 ]]; then
             # First range: Files smaller than START_SIZE
             file_count_array["sub${lower_size}"]=$(find "$PATH_SHARE_ARRAY" -type f -size -"${lower_size}c" | wc -l)
