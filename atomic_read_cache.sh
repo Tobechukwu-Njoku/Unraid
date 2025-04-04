@@ -25,6 +25,7 @@
 SHARE_NAME="Test-Share" # Set the name of your share here
 CACHE_NAME="xray"       # Set the name of your cache here
 DRY_RUN=true            # Set to true for a dry run
+CLEAN_EMPTY=false        # Set to true to clean up empty directories after moving files
 
 # Declare environment variables
 START_SIZE=1           # Initial size threshold in megabytes (numeric only) default 64
@@ -33,6 +34,7 @@ ITERATIONS=8            # Number of iterations for size thresholds default 8
 
 # Don't change the following variables
 VALID_PATHS=false       # Set to true if the paths exist
+VALID_PARAMS=false      # Set to true if the parameters are valid
 PATH_SHARE_ARRAY="/mnt/user0/$SHARE_NAME"           # Source (only from array)
 PATH_SHARE_CACHE="/mnt/$CACHE_NAME/$SHARE_NAME"     # Destination (cache disk)
 
@@ -85,7 +87,7 @@ format_size() {
     local size_bytes=$1
     if ((size_bytes >= 1024 * 1024 * 1024)); then
         echo "$((size_bytes / 1024 / 1024 / 1024))G"
-    else ((size_bytes >= 1024 * 1024)); then
+    else
         echo "$((size_bytes / 1024 / 1024))M"
     fi
 }
@@ -137,19 +139,10 @@ move_files() {
 # Function to process files smaller than the specified size
 safety_checks() {
     export -f move_files
-    export PATH_SHARE_ARRAY PATH_SHARE_CACHE DRY_RUN
+    export PATH_SHARE_ARRAY PATH_SHARE_CACHE DRY_RUN VALID_PATHS VALID_PARAMS
 
-    if [ -d $PATH_SHARE_ARRAY ]; then
-        log "Check 01 Passed: Directory exists on array."
-        if [ -d $PATH_SHARE_CACHE ]; then
-            log "Check 02 Passed: Directory exists on cache."
-            VALID_PATHS=true
-        else
-            log "Check 02 Failed: Directory $PATH_SHARE_CACHE does not exist on cache."
-        fi
-    else
-        log "Check 01 Failed: Directory $PATH_SHARE_ARRAY does not exist on array."
-    fi
+    validate_parameters
+    validate_paths
 }
 
 process_files() {
@@ -162,8 +155,71 @@ process_files() {
 }
 
 cleanup_empty_dirs() {
-    log "Cleaning up empty directories in $PATH_SHARE_ARRAY"
-    find "$PATH_SHARE_ARRAY" -type d -empty -delete || log "Error: Failed to clean up empty directories"
+    if $CLEAN_EMPTY; then
+        log "Cleaning up empty directories in $PATH_SHARE_ARRAY"
+        find "$PATH_SHARE_ARRAY" -type d -empty -delete || log "Error: Failed to clean up empty directories"
+    fi
+}
+
+validate_parameters() {
+    if ((START_SIZE > 0)); then
+        "$VALID_PARAMS" = true
+    else
+        echo "Error: START_SIZE must be greater than 0"
+        exit 1
+    fi
+
+    if ((SIZE_MULTIPLIER > 1)); then
+        "$VALID_PARAMS" = true
+    else
+        echo "Error: SIZE_MULTIPLIER must be greater than 1"
+        exit 1
+    fi
+
+    if ((ITERATIONS > 1)); then
+        "$VALID_PARAMS" = true
+    else
+        echo "Error: ITERATIONS must be greater than 0"
+        exit 1
+    fi
+
+    if $VALID_PARAMS; then
+        log "Parameters validated successfully."
+    else
+        log "Error: One or more parameters are incorrect. Please check the configuration."
+        exit 1
+    fi
+}
+
+validate_paths() {
+    if [ -d "$PATH_SHARE_ARRAY" ]; then
+        "$VALID_PATHS" = true
+    else
+        echo "Error: Source path $PATH_SHARE_ARRAY does not exist."
+        exit 1
+    fi
+
+    if [ -d "$PATH_SHARE_CACHE" ]; then
+        "$VALID_PATHS" = true
+    else
+        echo "Error: Destination path $PATH_SHARE_CACHE does not exist."
+        exit 1
+    fi
+
+    if $VALID_PATHS; then
+        log "Paths validated successfully."
+    else
+        log "Error: One or more paths do not exist. Please check the configuration."
+        exit 1
+    fi
+}
+
+post_execution_message() {
+    if $DRY_RUN; then
+        log "Dry run completed. No files were moved."
+    else
+        log "Files moved successfully."
+    fi
 }
 
 task_execution() {
@@ -173,14 +229,9 @@ task_execution() {
         count_files
         display_results
         process_files
-        if $DRY_RUN; then
-            log "Dry run completed. No files were moved."
-        else
-            log "Files moved successfully."
-        fi
-    else
-        log "Error: One or more paths do not exist. Please check the configuration."
-    fi
+        cleanup_empty_dirs
+        post_execution_message
+    fi    
 }
 
 # Main script execution
