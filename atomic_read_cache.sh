@@ -163,21 +163,21 @@ cleanup_empty_dirs() {
 
 validate_parameters() {
     if ((START_SIZE > 0)); then
-        "$VALID_PARAMS" = true
+        VALID_PARAMS=true
     else
         echo "Error: START_SIZE must be greater than 0"
         exit 1
     fi
 
     if ((SIZE_MULTIPLIER > 1)); then
-        "$VALID_PARAMS" = true
+        VALID_PARAMS=true
     else
         echo "Error: SIZE_MULTIPLIER must be greater than 1"
         exit 1
     fi
 
     if ((ITERATIONS > 1)); then
-        "$VALID_PARAMS" = true
+        VALID_PARAMS=true
     else
         echo "Error: ITERATIONS must be greater than 0"
         exit 1
@@ -193,14 +193,14 @@ validate_parameters() {
 
 validate_paths() {
     if [ -d "$PATH_SHARE_ARRAY" ]; then
-        "$VALID_PATHS" = true
+        VALID_PATHS=true
     else
         echo "Error: Source path $PATH_SHARE_ARRAY does not exist."
         exit 1
     fi
 
     if [ -d "$PATH_SHARE_CACHE" ]; then
-        "$VALID_PATHS" = true
+        VALID_PATHS=true
     else
         echo "Error: Destination path $PATH_SHARE_CACHE does not exist."
         exit 1
