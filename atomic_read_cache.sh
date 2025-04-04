@@ -41,6 +41,7 @@ PATH_SHARE_CACHE="/mnt/$CACHE_NAME/$SHARE_NAME"     # Destination (cache disk)
 declare -A file_count_array
 declare -A file_count_cache
 size_thresholds_bytes=()
+BYTES_IN_MB=$((1024 * 1024))
 
 LOG_FILE="/var/log/atomic_read_cache.log"
 
@@ -49,13 +50,12 @@ log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
 }
 
-# Function to generate size thresholds
-generate_size_thresholds_bytes() {
-    size_thresholds_bytes[0]=$((START_SIZE * 1024 * 1024))  # Convert START_SIZE to bytes
+generate_size_thresholds() {
+    size_thresholds_bytes[0]=$((START_SIZE * BYTES_IN_MB))
     for ((i = 1; i < ITERATIONS; i++)); do
         prev_size=${size_thresholds_bytes[$((i-1))]}
         next_size=$((prev_size * SIZE_MULTIPLIER))
-        size_thresholds_bytes[i]=$next_size  # Store size in bytes
+        size_thresholds_bytes[i]=$next_size
     done
 }
 
@@ -157,7 +157,7 @@ process_files() {
 task_execution() {
     safety_checks
     if $VALID_PATHS; then
-        generate_size_thresholds_bytes
+        generate_size_thresholds
         count_files
         display_results
         process_files
