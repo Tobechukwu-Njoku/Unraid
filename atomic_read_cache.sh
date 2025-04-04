@@ -147,10 +147,11 @@ safety_checks() {
 
 process_files() {
     log "Moving files smaller than $START_SIZE MB from '$PATH_SHARE_ARRAY' to '$PATH_SHARE_CACHE'"
-    log "Cache conquest in progress... Stand ready for its completion!"
     find "$PATH_SHARE_ARRAY" -type f -size -"$START_SIZE"M -print0 | while IFS= read -r -d '' file; do
         move_files "$file"
+        echo -n "."  # Progress indicator
     done
+    echo  # Newline after progress dots
 }
 
 cleanup_empty_dirs() {
