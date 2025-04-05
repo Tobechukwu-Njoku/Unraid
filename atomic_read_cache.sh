@@ -214,6 +214,22 @@ move_files() {
     fi
 }
 
+check_free_space() {
+    local required_space=$1  # Space required in bytes
+    local free_space
+
+    # Get the free space on the cache disk in bytes
+    free_space=$(df --output=avail -B1 "$PATH_SHARE_CACHE" | tail -n 1)
+
+    if ((free_space >= required_space)); then
+        log "Success: Sufficient free space available on cache: $((free_space / BYTES_IN_MB)) MB"
+        return 0
+    else
+        log "Error: Inufficient free space on cache. Required: $((required_space / BYTES_IN_MB)) MB, Available: $((free_space / BYTES_IN_MB)) MB"
+        return 1
+    fi
+}
+
 process_files() {
     log "Moving files smaller than $START_SIZE MB from '$PATH_SHARE_ARRAY' to '$PATH_SHARE_CACHE'"
     find "$PATH_SHARE_ARRAY" -type f -size -"$START_SIZE"M -print0 | while IFS= read -r -d '' file; do
