@@ -26,7 +26,6 @@
 
 #Todo:
 # - Add unit tests
-# - Add trap for cleanup
 # - Add error handling for file move failures
 # - Change permission of moved files to 777
 # - Check size of moved files to ensure they are not larger than the free space on the cache
@@ -291,6 +290,8 @@ task_execution() {
     cleanup_empty_dirs
     post_execution_message
 }
+
+trap 'log "Script interrupted. Exiting."; exit 1' INT TERM
 
 # Main script execution
 task_execution
