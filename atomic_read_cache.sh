@@ -5,7 +5,7 @@
 
 #author=T. N.
 #date=2025-04-03
-#version=1.1.2
+#version=1.1.3
 #license=MIT
 #--------------------------------------------------------------------------------------------------------------------------------
 # This script is designed to move small files to the cache pool of an array backed share
