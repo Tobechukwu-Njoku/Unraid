@@ -31,6 +31,7 @@
 # - Change permission of moved files to 777
 # - Check size of moved files to ensure they are not larger than the free space on the cache
 # - Move larger files back to the array if they exceed the threshold
+# - Do not allow this to run on 'appdata' share
 
 #Tofix:
 # - Function "count_files" is not collapsing correctly
@@ -240,6 +241,31 @@ process_files() {
     echo  # Newline after progress dots
 }
 
+change_permissions() {
+    local target_path="$1"
+
+    if [ -d "$target_path" ]; then
+        log "Changing permissions for files and directories in $target_path"
+
+        # Change permissions for directories to drwxrwxrwx
+        find "$target_path" -type d -exec chmod 777 {} \; || {
+            log "Error: Failed to change permissions for directories in $target_path"
+            return 1
+        }
+
+        # Change permissions for files to -rw-rw-rw-
+        find "$target_path" -type f -exec chmod 666 {} \; || {
+            log "Error: Failed to change permissions for files in $target_path"
+            return 1
+        }
+
+        log "Permissions successfully updated for $target_path"
+    else
+        log "Error: Target path $target_path does not exist or is not a directory"
+        return 1
+    fi
+}
+
 cleanup_empty_dirs() {
     if $CLEAN_EMPTY; then
         log "Cleaning up empty directories in $PATH_SHARE_ARRAY"
@@ -261,6 +287,7 @@ task_execution() {
     count_files
     display_results
     process_files
+    change_permissions "$PATH_SHARE_CACHE"
     cleanup_empty_dirs
     post_execution_message
 }
