@@ -5,7 +5,7 @@
 
 #author=T. N.
 #date=2025-04-03
-#version=1.1.1
+#version=1.1.2
 #license=MIT
 #--------------------------------------------------------------------------------------------------------------------------------
 # This script is designed to move small files to the cache pool of an array backed share
@@ -14,13 +14,25 @@
 # It also provides a dry run option to preview the files that would be moved
 # before actually moving them
 #--------------------------------------------------------------------------------------------------------------------------------
+# INSTRUCTIONS:
+#
+# 1. Set the SHARE_NAME and CACHE_NAME variables to your desired share and cache names
+# 2. Set the DRY_RUN variable to true for a dry run or false to actually move files
+# 3. Set the CLEAN_EMPTY variable to true if you want to clean up empty directories after moving files
+# 4. Set the START_SIZE 
+# 5. Adjust the START_SIZE so a good number of files are within the size range
+# 6. Set the DRY_RUN variable to false to actually move files
 
 #Todo:
 # - Add unit tests
 # - Add trap for cleanup
+# - Add error handling for file move failures
+# - Change permission of moved files to 777
+# - Check size of moved files to ensure they are not larger than the free space on the cache
+# - Move larger files back to the array if they exceed the threshold
 
 #Tofix:
-# - NA
+# - Function "count_files" is not collapsing correctly
 
 # Configuration
 SHARE_NAME="Test-Share" # Set the name of your share here
@@ -28,12 +40,16 @@ CACHE_NAME="xray"       # Set the name of your cache here
 DRY_RUN=true            # Set to true for a dry run
 CLEAN_EMPTY=false        # Set to true to clean up empty directories after moving files
 
-# Declare environment variables
+# Moving threshold & table printing variable
 START_SIZE=1           # Initial size threshold in megabytes (numeric only) default 64
+
+# Table printing variables
 SIZE_MULTIPLIER=2       # Multiplier for size increases (e.g., 64M, 128M, etc.) default 2
 ITERATIONS=8            # Number of iterations for size thresholds default 8
 
-# Don't change the following variables
+#--------------------------------------------------------------------------------------------------------------------------------
+# Don't change the variables below unless you know what you're doing
+#--------------------------------------------------------------------------------------------------------------------------------
 VALID_PATHS=false       # Set to true if the paths exist
 VALID_PARAMS=false      # Set to true if the parameters are valid
 PATH_SHARE_ARRAY="/mnt/user0/$SHARE_NAME"           # Source (only from array)
@@ -50,6 +66,68 @@ LOG_FILE="/var/log/atomic_read_cache.log"
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+}
+
+# Function to process files smaller than the specified size
+safety_checks() {
+    export -f move_files
+    export PATH_SHARE_ARRAY PATH_SHARE_CACHE DRY_RUN VALID_PATHS VALID_PARAMS
+
+    validate_parameters
+    validate_paths
+}
+
+validate_parameters() {
+    if ((START_SIZE > 0)); then
+        VALID_PARAMS=true
+    else
+        echo "Error: START_SIZE must be greater than 0"
+        exit 1
+    fi
+
+    if ((SIZE_MULTIPLIER > 1)); then
+        VALID_PARAMS=true
+    else
+        echo "Error: SIZE_MULTIPLIER must be greater than 1"
+        exit 1
+    fi
+
+    if ((ITERATIONS > 1)); then
+        VALID_PARAMS=true
+    else
+        echo "Error: ITERATIONS must be greater than 0"
+        exit 1
+    fi
+
+    if $VALID_PARAMS; then
+        log "Parameters validated successfully."
+    else
+        log "Error: One or more parameters are incorrect. Please check the configuration."
+        exit 1
+    fi
+}
+
+validate_paths() {
+    if [ -d "$PATH_SHARE_ARRAY" ]; then
+        VALID_PATHS=true
+    else
+        echo "Error: Source path $PATH_SHARE_ARRAY does not exist."
+        exit 1
+    fi
+
+    if [ -d "$PATH_SHARE_CACHE" ]; then
+        VALID_PATHS=true
+    else
+        echo "Error: Destination path $PATH_SHARE_CACHE does not exist."
+        exit 1
+    fi
+
+    if $VALID_PATHS; then
+        log "Paths validated successfully."
+    else
+        log "Error: One or more paths do not exist. Please check the configuration."
+        exit 1
+    fi
 }
 
 generate_size_thresholds() {
@@ -136,15 +214,6 @@ move_files() {
     fi
 }
 
-# Function to process files smaller than the specified size
-safety_checks() {
-    export -f move_files
-    export PATH_SHARE_ARRAY PATH_SHARE_CACHE DRY_RUN VALID_PATHS VALID_PARAMS
-
-    validate_parameters
-    validate_paths
-}
-
 process_files() {
     log "Moving files smaller than $START_SIZE MB from '$PATH_SHARE_ARRAY' to '$PATH_SHARE_CACHE'"
     find "$PATH_SHARE_ARRAY" -type f -size -"$START_SIZE"M -print0 | while IFS= read -r -d '' file; do
@@ -158,59 +227,6 @@ cleanup_empty_dirs() {
     if $CLEAN_EMPTY; then
         log "Cleaning up empty directories in $PATH_SHARE_ARRAY"
         find "$PATH_SHARE_ARRAY" -type d -empty -delete || log "Error: Failed to clean up empty directories"
-    fi
-}
-
-validate_parameters() {
-    if ((START_SIZE > 0)); then
-        VALID_PARAMS=true
-    else
-        echo "Error: START_SIZE must be greater than 0"
-        exit 1
-    fi
-
-    if ((SIZE_MULTIPLIER > 1)); then
-        VALID_PARAMS=true
-    else
-        echo "Error: SIZE_MULTIPLIER must be greater than 1"
-        exit 1
-    fi
-
-    if ((ITERATIONS > 1)); then
-        VALID_PARAMS=true
-    else
-        echo "Error: ITERATIONS must be greater than 0"
-        exit 1
-    fi
-
-    if $VALID_PARAMS; then
-        log "Parameters validated successfully."
-    else
-        log "Error: One or more parameters are incorrect. Please check the configuration."
-        exit 1
-    fi
-}
-
-validate_paths() {
-    if [ -d "$PATH_SHARE_ARRAY" ]; then
-        VALID_PATHS=true
-    else
-        echo "Error: Source path $PATH_SHARE_ARRAY does not exist."
-        exit 1
-    fi
-
-    if [ -d "$PATH_SHARE_CACHE" ]; then
-        VALID_PATHS=true
-    else
-        echo "Error: Destination path $PATH_SHARE_CACHE does not exist."
-        exit 1
-    fi
-
-    if $VALID_PATHS; then
-        log "Paths validated successfully."
-    else
-        log "Error: One or more paths do not exist. Please check the configuration."
-        exit 1
     fi
 }
 
