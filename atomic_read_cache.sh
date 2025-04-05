@@ -109,10 +109,17 @@ validate_parameters() {
 }
 
 validate_paths() {
+    # Check if SHARE_NAME is "appdata"
+    if [[ "$SHARE_NAME" == "appdata" ]]; then
+        log "Error: This script is not allowed to run on the 'appdata' share."
+        exit 1
+    fi
+
     if [ -d "$PATH_SHARE_ARRAY" ]; then
         VALID_PATHS=true
     else
         echo "Error: Source path $PATH_SHARE_ARRAY does not exist."
+        VALID_PATHS=false
         exit 1
     fi
 
@@ -120,6 +127,7 @@ validate_paths() {
         VALID_PATHS=true
     else
         echo "Error: Destination path $PATH_SHARE_CACHE does not exist."
+        VALID_PATHS=false
         exit 1
     fi
 
@@ -127,6 +135,7 @@ validate_paths() {
         log "Paths validated successfully."
     else
         log "Error: One or more paths do not exist. Please check the configuration."
+        VALID_PATHS=false
         exit 1
     fi
 }
