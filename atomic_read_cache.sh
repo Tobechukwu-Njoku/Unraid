@@ -26,14 +26,10 @@
 
 #Todo:
 # - Add unit tests
-# - Add error handling for file move failures
-# - Change permission of moved files to 777
 # - Check size of moved files to ensure they are not larger than the free space on the cache
 # - Move larger files back to the array if they exceed the threshold
-# - Do not allow this to run on 'appdata' share
 
 #Tofix:
-# - Function "count_files" is not collapsing correctly
 
 # Configuration
 SHARE_NAME="Test-Share" # Set the name of your share here
