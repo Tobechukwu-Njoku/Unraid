@@ -22,6 +22,7 @@
 # 4. Set the START_SIZE 
 # 5. Adjust the START_SIZE so a good number of files are within the size range
 # 6. Set the DRY_RUN variable to false to actually move files
+#--------------------------------------------------------------------------------------------------------------------------------
 
 #Todo:
 # - Add unit tests
@@ -130,6 +131,22 @@ validate_paths() {
     fi
 }
 
+validate_free_space() {
+    local required_space=$1  # Space required in bytes
+    local free_space
+
+    # Get the free space on the cache disk in bytes
+    free_space=$(df --output=avail -B1 "$PATH_SHARE_CACHE" | tail -n 1)
+
+    if ((free_space >= required_space)); then
+        log "Success: Sufficient free space available on cache: $((free_space / BYTES_IN_MB)) MB"
+        return 0
+    else
+        log "Error: Inufficient free space on cache. Required: $((required_space / BYTES_IN_MB)) MB, Available: $((free_space / BYTES_IN_MB)) MB"
+        return 1
+    fi
+}
+
 generate_size_thresholds() {
     size_thresholds_bytes[0]=$((START_SIZE * BYTES_IN_MB))
     for ((i = 1; i < ITERATIONS; i++)); do
@@ -211,22 +228,6 @@ move_files() {
             log "Error: Failed to move $src_file to $dest_path"
             return 1
         }
-    fi
-}
-
-check_free_space() {
-    local required_space=$1  # Space required in bytes
-    local free_space
-
-    # Get the free space on the cache disk in bytes
-    free_space=$(df --output=avail -B1 "$PATH_SHARE_CACHE" | tail -n 1)
-
-    if ((free_space >= required_space)); then
-        log "Success: Sufficient free space available on cache: $((free_space / BYTES_IN_MB)) MB"
-        return 0
-    else
-        log "Error: Inufficient free space on cache. Required: $((required_space / BYTES_IN_MB)) MB, Available: $((free_space / BYTES_IN_MB)) MB"
-        return 1
     fi
 }
 
