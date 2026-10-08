@@ -1,6 +1,6 @@
 # Library Cleaner
 
-[![Tests](https://github.com/Tobechukwu-Njoku/library-cleaner/actions/workflows/test.yml/badge.svg)](https://github.com/Tobechukwu-Njoku/library-cleaner/actions/workflows/test.yml)
+[![Tests](https://github.com/Tobechukwu-Njoku/Unraid/actions/workflows/library-cleaner.yml/badge.svg)](https://github.com/Tobechukwu-Njoku/Unraid/actions/workflows/library-cleaner.yml)
 
 Three Bash scripts for [Unraid User Scripts](https://forums.unraid.net/topic/48286-plugin-ca-user-scripts/)
 that tidy up a Radarr/Sonarr media library so Jellyfin, Emby and Kodi pick
@@ -215,4 +215,4 @@ and coreutils; macOS ships bash 3.2 and BSD tools.
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](../../LICENSE).

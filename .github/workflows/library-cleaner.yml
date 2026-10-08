@@ -1,9 +1,15 @@
-name: Tests
+name: library-cleaner
 
 on:
   push:
     branches: [main]
+    paths:
+      - 'user-scripts/library-cleaner/**'
+      - '.github/workflows/library-cleaner.yml'
   pull_request:
+    paths:
+      - 'user-scripts/library-cleaner/**'
+      - '.github/workflows/library-cleaner.yml'
   workflow_dispatch:
 
 permissions:
@@ -13,6 +19,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: user-scripts/library-cleaner
     steps:
       - uses: actions/checkout@v4
 
