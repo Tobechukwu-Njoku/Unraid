@@ -349,6 +349,11 @@ for season in "${season_folders[@]}"; do
     trickplays=("$season"/*.trickplay)
     shopt -u nullglob
 
+    # Orphans are gathered first and settled per episode, since stale
+    # trickplay from more than one earlier release can compete for the
+    # same name.
+    tp_orphans=()
+    tp_orphan_ep=()
     for tp in "${trickplays[@]}"; do
         [ -d "$tp" ] || continue
         tp_basename="${tp##*/}"
@@ -383,8 +388,22 @@ for season in "${season_folders[@]}"; do
             continue
         fi
 
-        rename_trickplay "$tp" "$season/$expected_tp"
+        tp_orphans+=("$tp")
+        tp_orphan_ep+=("${ep_basename%.*}")
     done
+
+    declare -A tp_ep_done=()
+    for i in "${!tp_orphans[@]}"; do
+        ep="${tp_orphan_ep[$i]}"
+        [ -n "${tp_ep_done[$ep]:-}" ] && continue
+        tp_ep_done["$ep"]=1
+        contenders=()
+        for j in "${!tp_orphans[@]}"; do
+            [ "${tp_orphan_ep[$j]}" = "$ep" ] && contenders+=("${tp_orphans[$j]}")
+        done
+        resolve_trickplays "$ep" "$season" "${contenders[@]}"
+    done
+    unset tp_ep_done
 
     # ------------------ OUTLIER .NFO / ARTWORK --------------
     # tvshow.nfo lives in the show root, not a season folder, so
@@ -406,5 +425,7 @@ SUMMARY_EXTRA+=("Subtitles skipped (no episode):|$sub_skip_noep")
 SUMMARY_EXTRA+=("Trickplay already correct:|$tp_skip_noop")
 SUMMARY_EXTRA+=("Trickplay skipped (exists):|$tp_skip_exists")
 SUMMARY_EXTRA+=("Trickplay skipped (no episode):|$tp_skip_noep")
+SUMMARY_EXTRA+=("Trickplay skipped (ambiguous):|$tp_skip_ambig")
+SUMMARY_EXTRA+=("Trickplay skipped (lost match):|$tp_skip_lost")
 SUMMARY_EXTRA+=("Skipped (ambiguous duplicate):|$ep_ambig")
 print_summary

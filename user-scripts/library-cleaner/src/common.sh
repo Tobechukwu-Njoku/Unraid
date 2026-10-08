@@ -115,6 +115,8 @@ sub_skip_exists=0
 tp_rename=0
 tp_skip_noop=0
 tp_skip_exists=0
+tp_skip_ambig=0
+tp_skip_lost=0
 orphan_delete=0
 outlier_delete=0
 nfo_outlier_delete=0
@@ -301,6 +303,19 @@ delete_file() {
     fi
 }
 
+# Names this run has already given out. A dry run moves nothing, so
+# without this a second file aiming at the same name finds it free
+# and is reported as a rename too - a promise the live run then can't
+# keep. Live runs record it as well; the file is on disk by then, so
+# it only ever matters for dry runs.
+declare -A CLAIMED=()
+
+claim() { CLAIMED["$1"]=1; }
+
+# True when $1 is free on disk but an earlier rename in this run has
+# already claimed it - which, in practice, means a dry run.
+claimed_only() { [ -n "${CLAIMED[$1]:-}" ] && [ ! -e "$1" ]; }
+
 # A VobSub subtitle is two files: a small .idx index and a large
 # .sub payload. They must share a base name AND come from the same
 # release - an index from one release with the payload of another
@@ -343,6 +358,14 @@ finish_subtitle_pair() {
 
     if [ "$a" = "$ta" ] && [ "$b" = "$tb" ]; then
         sub_skip_noop=$((sub_skip_noop + 2))
+        return 0
+    fi
+
+    if claimed_only "$ta" || claimed_only "$tb"; then
+        log "[SUB PAIR DRY-RUN collision] $a"
+        log "                       +    $b"
+        log "      already claimed:      $ta"
+        sub_skip_exists=$((sub_skip_exists + 2))
         return 0
     fi
 
@@ -390,10 +413,12 @@ finish_subtitle_pair() {
         log "              +    $b"
         log "         -->       $ta"
         sub_rename=$((sub_rename + 2))
+        claim "$ta"; claim "$tb"
         return 0
     fi
 
     if mv -n -- "$a" "$ta" && mv -n -- "$b" "$tb"; then
+        claim "$ta"; claim "$tb"
         log "[SUB PAIR RENAMED] ${a##*/} + ${b##*/}"
         log "              -->  ${ta##*/} + ${tb##*/}"
         sub_rename=$((sub_rename + 2))
@@ -529,6 +554,15 @@ finish_subtitle() {
         return
     fi
 
+    if claimed_only "$new_path"; then
+        # On a real run the earlier rename will have landed, and this
+        # becomes an ordinary collision handled below.
+        log "[SUB DRY-RUN collision] $sub"
+        log "   already claimed:  $new_path"
+        sub_skip_exists=$((sub_skip_exists + 1))
+        return
+    fi
+
     if [ -e "$new_path" ]; then
         if [ "$DELETE_DUPLICATES" = "true" ]; then
             local winner
@@ -577,8 +611,10 @@ finish_subtitle() {
         log "[SUB DRY-RUN] $sub"
         log "         -->  $new_path"
         sub_rename=$((sub_rename + 1))
+        claim "$new_path"
     else
         if mv -n -- "$sub" "$new_path"; then
+            claim "$new_path"
             log "[SUB RENAMED] $sub_basename"
             log "         -->  $new_name"
             sub_rename=$((sub_rename + 1))
@@ -636,7 +672,7 @@ rename_trickplay() {
     tp_basename="${tp##*/}"
     expected_tp="${target_path##*/}"
 
-    if [ -e "$target_path" ]; then
+    if [ -e "$target_path" ] || claimed_only "$target_path"; then
         log "[TP SKIP exists] $tp"
         log "            -->  $target_path"
         tp_skip_exists=$((tp_skip_exists + 1))
@@ -647,8 +683,10 @@ rename_trickplay() {
         log "[TP DRY-RUN] $tp"
         log "        -->  $target_path"
         tp_rename=$((tp_rename + 1))
+        claim "$target_path"
     else
         if mv -n -- "$tp" "$target_path"; then
+            claim "$target_path"
             log "[TP RENAMED] $tp_basename"
             log "        -->  $expected_tp"
             tp_rename=$((tp_rename + 1))
@@ -657,6 +695,84 @@ rename_trickplay() {
             error_count=$((error_count + 1))
         fi
     fi
+}
+
+# Release group and quality tag of a Radarr/Sonarr-style name, both
+# lowercased, into RELEASE_GROUP and QUALITY_TAG (empty when absent).
+#   ...[Remux-1080p 8bit AVC TrueHD Atmos]-FraMeSToR -> framestor, remux-1080p
+release_markers() {
+    local n="$1" g=""
+    RELEASE_GROUP=""
+    QUALITY_TAG=""
+    [[ "$n" == *-* ]] && g="${n##*-}"
+    g="${g,,}"
+    [[ "$g" =~ ^[a-z0-9]+$ ]] && RELEASE_GROUP="$g"
+    if [[ "$n" =~ \[([A-Za-z]+-[0-9]{3,4}p) ]]; then
+        QUALITY_TAG="${BASH_REMATCH[1],,}"
+    fi
+}
+
+# Pick which of several orphaned trickplay folders belongs to the
+# video $1. Sets TP_WINNER, empty when no candidate is clearly best.
+#
+# A folder can hold stale trickplay from more than one earlier release,
+# all wanting the same new name. Taking the first alphabetically chose
+# the OLDEST release every time - "[Bluray..." sorts before "[Remux..."
+# and "[WEBDL..." - and left the matching one orphaned. Score each
+# against the video instead: release group 2, quality tag 1.
+choose_trickplay() {
+    local video="$1" tp base score best=0 tied=0 vg vq
+    shift
+    TP_WINNER=""
+    release_markers "$video"
+    vg="$RELEASE_GROUP"; vq="$QUALITY_TAG"
+    for tp in "$@"; do
+        base="${tp##*/}"
+        release_markers "${base%.trickplay}"
+        score=0
+        [ -n "$vg" ] && [ "$RELEASE_GROUP" = "$vg" ] && score=$((score + 2))
+        [ -n "$vq" ] && [ "$QUALITY_TAG" = "$vq" ] && score=$((score + 1))
+        if [ "$score" -gt "$best" ]; then
+            best="$score"; TP_WINNER="$tp"; tied=0
+        elif [ "$score" -eq "$best" ] && [ "$score" -gt 0 ]; then
+            tied=1
+        fi
+    done
+    [ "$tied" -eq 1 ] && TP_WINNER=""
+    return 0
+}
+
+# Rename the orphaned trickplay folders that all want to become
+# <video>.trickplay in $2. One candidate is renamed as before; several
+# are settled by choose_trickplay, and the losers are left in place
+# for jellyfin-clean-trickplay-folders, or you, to remove.
+resolve_trickplays() {
+    local video="$1" folder="$2" tp target
+    shift 2
+    target="$folder/$video.trickplay"
+    [ "$#" -eq 0 ] && return 0
+
+    # Nothing to contest: one candidate, or the right name is already
+    # taken and every candidate is skipped as it always was.
+    if [ "$#" -eq 1 ] || [ -e "$target" ]; then
+        for tp in "$@"; do rename_trickplay "$tp" "$target"; done
+        return 0
+    fi
+
+    choose_trickplay "$video" "$@"
+    if [ -z "$TP_WINNER" ]; then
+        for tp in "$@"; do
+            log "[TP SKIP ambiguous - $# candidates, none matches the video's release] $tp"
+            tp_skip_ambig=$((tp_skip_ambig + 1))
+        done
+        return 0
+    fi
+    for tp in "$@"; do
+        [ "$tp" = "$TP_WINNER" ] && continue
+        log "[TP SKIP lost to a closer match] $tp"
+        tp_skip_lost=$((tp_skip_lost + 1))
+    done
+    rename_trickplay "$TP_WINNER" "$target"
 }
 
 # Returns 0 if the lowercase image basename $1 belongs to this

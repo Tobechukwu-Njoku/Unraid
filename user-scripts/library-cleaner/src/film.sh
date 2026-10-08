@@ -240,7 +240,6 @@ UNIT_LABEL="Folders"
 
 # Film-only counters.
 sub_skip_extra=0
-tp_skip_ambig=0
 subs_folder_skip=0
 
 # ---------- PASS 1: collect main video per folder -----------
@@ -310,6 +309,7 @@ for folder in "${!MAIN_VIDEO[@]}"; do
     trickplays=("$folder"/*.trickplay)
     shopt -u nullglob
 
+    tp_orphans=()
     for tp in "${trickplays[@]}"; do
         [ -d "$tp" ] || continue
         tp_basename="${tp##*/}"
@@ -335,8 +335,9 @@ for folder in "${!MAIN_VIDEO[@]}"; do
             continue
         fi
 
-        rename_trickplay "$tp" "$folder/$expected_tp"
+        tp_orphans+=("$tp")
     done
+    resolve_trickplays "$main_name" "$folder" ${tp_orphans+"${tp_orphans[@]}"}
 
     # ------------------ OUTLIER .NFO / ARTWORK --------------
     [ "$DELETE_OUTLIER_NFO" = "true" ] && nfo_pass "$folder" "movie.nfo"
@@ -386,4 +387,5 @@ fi
 SUMMARY_EXTRA+=("Trickplay already correct:|$tp_skip_noop")
 SUMMARY_EXTRA+=("Trickplay skipped (exists):|$tp_skip_exists")
 SUMMARY_EXTRA+=("Trickplay skipped (ambiguous):|$tp_skip_ambig")
+SUMMARY_EXTRA+=("Trickplay skipped (lost match):|$tp_skip_lost")
 print_summary

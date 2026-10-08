@@ -31,6 +31,21 @@ The film script picks the **largest video in the folder** as the feature. The TV
 script instead pairs each file to an episode by the `SxxExx` token in its name,
 because a season folder holds many videos.
 
+When a folder holds stale trickplay from **more than one** earlier release, all
+wanting the same name, the one whose release group (then quality tag) matches
+the video wins:
+
+```
+Video:  Chappie (2015) [Remux-1080p 8bit AVC TrueHD Atmos]-FraMeSToR.mkv
+        Chappie (2015) [tmdbid-198184] - [Remux-1080p 8bit AVC]...-FraMeSToR.trickplay  -> renamed
+        Chappie (2015) [tmdbid-198184] - [Bluray-1080p 8bit h264]...-War10ck.trickplay  -> left
+```
+
+If none matches clearly, all are left alone and logged as ambiguous. The losers
+are never deleted here — run [`jellyfin-clean-trickplay-folders`](../jellyfin-clean-trickplay-folders/)
+**afterwards** to clear them. Run it *before* and it removes the stale folders
+this script would have renamed.
+
 ## Usage
 
 1. Copy a script into a new User Script in the Unraid web UI.

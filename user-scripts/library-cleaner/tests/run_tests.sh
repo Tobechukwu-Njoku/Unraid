@@ -1035,6 +1035,126 @@ gen "$REPO/NFO Cleaner" "$WORK/rtn.sh" "$WORK/ov_rtn"
 
 
 # =====================================================================
+#  CONTESTED TRICKPLAY
+#  Taken from a real dry run: a folder holding stale trickplay from
+#  two earlier releases, both wanting the current video's name. The
+#  alphabetical-first rule picked the old Bluray release every time.
+# =====================================================================
+echo
+echo "=== CONTESTED TRICKPLAY ============================================"
+ct_fixture() {
+    rm -rf "$WORK/ct"
+    local d="$WORK/ct/Chappie (2015) {tmdb-198184}"
+    mkdir -p "$d"
+    head -c 4096 /dev/zero > "$d/Chappie (2015) [Remux-1080p 8bit AVC TrueHD Atmos]-FraMeSToR.mkv"
+    mkdir -p "$d/Chappie (2015) [tmdbid-198184] - [Bluray-1080p 8bit h264]{imdb-tt1823672}-War10ck.trickplay"
+    mkdir -p "$d/Chappie (2015) [tmdbid-198184] - [Remux-1080p 8bit AVC]{imdb-tt1823672}-FraMeSToR.trickplay"
+    : > "$d/Chappie (2015) [tmdbid-198184] - [Remux-1080p 8bit AVC]{imdb-tt1823672}-FraMeSToR.trickplay/right.jpg"
+}
+ct_fixture
+cd_="$WORK/ct/Chappie (2015) {tmdb-198184}"
+cat > "$WORK/ov_ct" <<OV
+ROOT_DIRS=("$WORK/ct")
+DRY_RUN="true"
+ENABLE_LOG="true"
+LOG_FILE="$WORK/ct.log"
+TRASH_DIR=""
+LOCK_FILE=""
+OV
+gen "$REPO/Library Cleaner Film" "$WORK/ct.sh" "$WORK/ov_ct"
+"$WORK/ct.sh" > "$WORK/ct.dry" 2>&1
+n="$(grep -c '^\[TP DRY-RUN\]' "$WORK/ct.dry")"
+[ "$n" -eq 1 ] && ok "dry run promises one rename, not two" \
+               || bad "dry run promised $n renames for one name"
+
+sed 's|^DRY_RUN="true"$|DRY_RUN="false"|' "$WORK/ov_ct" > "$WORK/ov_ct2"
+gen "$REPO/Library Cleaner Film" "$WORK/ct2.sh" "$WORK/ov_ct2"
+"$WORK/ct2.sh" > "$WORK/ct.live" 2>&1
+[ -f "$cd_/Chappie (2015) [Remux-1080p 8bit AVC TrueHD Atmos]-FraMeSToR.trickplay/right.jpg" ] \
+    && ok "the matching release's trickplay gets the name" \
+    || bad "the wrong trickplay was renamed"
+[ -d "$cd_/Chappie (2015) [tmdbid-198184] - [Bluray-1080p 8bit h264]{imdb-tt1823672}-War10ck.trickplay" ] \
+    && ok "the old release's trickplay is left alone" \
+    || bad "the old release's trickplay was touched"
+grep -q "TP SKIP lost to a closer match" "$WORK/ct.live" \
+    && ok "logs why the other one was passed over" \
+    || bad "no log line for the losing trickplay"
+
+# When nothing matches the video, neither is guessed at.
+ct_fixture
+mv "$cd_/Chappie (2015) [tmdbid-198184] - [Remux-1080p 8bit AVC]{imdb-tt1823672}-FraMeSToR.trickplay" \
+   "$cd_/Chappie (2015) [tmdbid-198184] - [WEBDL-720p 8bit h264]{imdb-tt1823672}-Other.trickplay"
+"$WORK/ct2.sh" > "$WORK/ct.tie" 2>&1
+n="$(find "$cd_" -maxdepth 1 -name '*.trickplay' | wc -l)"
+if [ "$n" -eq 2 ] && [ ! -e "$cd_/Chappie (2015) [Remux-1080p 8bit AVC TrueHD Atmos]-FraMeSToR.trickplay" ]; then
+    ok "no clear match: both left in place rather than guessed"
+else
+    bad "guessed between two trickplays that matched nothing"
+fi
+
+# TV: two stale trickplays competing for one episode.
+rm -rf "$WORK/ctv"; cs="$WORK/ctv/Show/Season 01"; mkdir -p "$cs"
+head -c 4096 /dev/zero > "$cs/Show - S01E01 - Pilot [WEBDL-1080p 8bit h264]-NTb.mkv"
+mkdir -p "$cs/Show - S01E01 - Old [Bluray-720p 8bit x264]-DEMAND.trickplay"
+mkdir -p "$cs/Show - S01E01 - Old [WEBDL-1080p 8bit h264]-NTb.trickplay"
+: > "$cs/Show - S01E01 - Old [WEBDL-1080p 8bit h264]-NTb.trickplay/right.jpg"
+cat > "$WORK/ov_ctv" <<OV
+ROOT_DIRS=("$WORK/ctv")
+DRY_RUN="false"
+ENABLE_LOG="false"
+TRASH_DIR=""
+LOCK_FILE=""
+OV
+gen "$REPO/Library Cleaner TV" "$WORK/ctv.sh" "$WORK/ov_ctv"
+"$WORK/ctv.sh" > /dev/null 2>&1
+[ -f "$cs/Show - S01E01 - Pilot [WEBDL-1080p 8bit h264]-NTb.trickplay/right.jpg" ] \
+    && ok "tv: the matching release's trickplay gets the episode's name" \
+    || bad "tv: the wrong trickplay was renamed"
+
+# =====================================================================
+#  DRY RUN PREDICTS THE LIVE RUN
+#  Whatever a dry run says it would do, a live run on the same tree
+#  must actually do - otherwise the dry run can't be trusted.
+# =====================================================================
+echo
+echo "=== DRY RUN = LIVE RUN ============================================="
+predict_fixture() {
+    build_film
+    ct_fixture
+    mv "$WORK/ct/Chappie (2015) {tmdb-198184}" "$WORK/films/"
+    # Two subtitles that resolve to the same name.
+    local d="$WORK/films/Film G (2026)"
+    mkdir -p "$d"
+    head -c 4096 /dev/zero > "$d/Film G (2026)-Radarr.mkv"
+    : > "$d/Film.2026.WEB.DDP.srt"
+    : > "$d/Film.2026.HDR.srt"
+}
+predict_fixture
+cat > "$WORK/ov_pr" <<OV
+ROOT_DIRS=("$WORK/films")
+DRY_RUN="true"
+ENABLE_LOG="true"
+LOG_FILE="$WORK/pr.log"
+TRASH_DIR=""
+LOCK_FILE=""
+OV
+gen "$REPO/Library Cleaner Film" "$WORK/pr.sh" "$WORK/ov_pr"
+"$WORK/pr.sh" > "$WORK/pr.dry" 2>&1
+predict_fixture
+sed 's|^DRY_RUN="true"$|DRY_RUN="false"|' "$WORK/ov_pr" > "$WORK/ov_pr2"
+gen "$REPO/Library Cleaner Film" "$WORK/pr2.sh" "$WORK/ov_pr2"
+"$WORK/pr2.sh" > "$WORK/pr.live" 2>&1
+count() { grep -E "$2" "$1" | grep -oE '[0-9]+$'; }
+for what in Subtitles Trickplay; do
+    d="$(count "$WORK/pr.dry"  "^ $what would rename:")"
+    l="$(count "$WORK/pr.live" "^ $what (folders )?renamed:")"
+    [ -n "$d" ] && [ "$d" = "$l" ] \
+        && ok "$what: dry run said $d, live run did $l" \
+        || bad "$what: dry run said ${d:-?}, live run did ${l:-?}"
+done
+
+
+# =====================================================================
 #  BUILD FRESHNESS
 #  The scripts at the repo root are generated from src/ by build.sh.
 #  Catch the case where src/ was edited but build.sh was not re-run.
