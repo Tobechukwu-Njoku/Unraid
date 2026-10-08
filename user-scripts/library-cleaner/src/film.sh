@@ -231,6 +231,35 @@ PROMOTE_SUBS_FOLDER="true"
 # anything else you put under TRASH_DIR is left alone.
 TRASH_KEEP_DAYS="30"
 
+# SAFETY. When a folder holds more than one feature-length video -
+# an old copy left beside a new one, or deliberate versions - a
+# subtitle that names none of them can't be paired reliably. The
+# largest file is often the OLD copy:
+#   Jurassic Park (1993) {tmdb-329}/
+#     ...[tmdbid-329] - [Bluray-1080p 10bit x265]...-Radarr.mkv    <- larger, old
+#     ...[Bluray-1080p 10bit h265 AAC]{edition-Remastered}...mkv   <- current
+# "false" leaves such subtitles alone and logs them as ambiguous.
+# "true" pairs them with the largest video, as before. Subtitles
+# that name one of the videos are unaffected either way.
+AMBIGUOUS_SUBS_TO_LARGEST="false"
+
+# Videos named with these Jellyfin extras suffixes ("-trailer",
+# "-featurette", ...) are never counted as a second feature, so a
+# film beside its trailer is not treated as ambiguous. Matched
+# case-insensitively at the end of the name. Short words such as
+# "scene" or "other" are left out deliberately: they are also
+# release-group names ("-SCENE").
+EXTRA_VIDEO_SUFFIXES=(
+    trailer teaser sample behindthescenes deleted deletedscene
+    featurette interview
+)
+
+# Folders holding more than one feature-length video are listed
+# here with each file's size, largest first, rewritten on every run
+# (dry runs included). Often an old copy that can go; sometimes
+# deliberate versions. Set to "" to skip the report.
+DUPLICATES_REPORT="/mnt/user/appdata/subtitle_renamer/duplicates_film.txt"
+
 # --------------------- END CONFIGURATION --------------------
 
 SCRIPT_TITLE="Library Cleaner - Film"
@@ -240,6 +269,7 @@ UNIT_LABEL="Folders"
 
 # Film-only counters.
 sub_skip_extra=0
+sub_skip_ambig=0
 subs_folder_skip=0
 
 # ---------- PASS 1: collect main video per folder -----------
@@ -270,6 +300,7 @@ done < <(find "${FIND_OPTS[@]}" "${ROOTS[@]}" "${FIND_EXPR[@]}" -printf '%s\t%p\
 
 # ---------- PASS 2: process each folder exactly once --------
 folder_count=0
+dup_report_init "Film folders holding more than one feature-length video. Often an old copy beside the current one; sometimes deliberate versions."
 
 for folder in "${!MAIN_VIDEO[@]}"; do
     folder_count=$((folder_count + 1))
@@ -280,6 +311,11 @@ for folder in "${!MAIN_VIDEO[@]}"; do
 
     declare -A vid_bases=()
     collect_video_bases "$folder"
+    nfeatures="${#FEATURE_VIDEOS[@]}"
+    if [ "$nfeatures" -gt 1 ]; then
+        log "[MULTIPLE VIDEOS - $nfeatures feature-length] $folder"
+        dup_report_group "$folder" "${FEATURE_VIDEOS[@]}"
+    fi
 
     # ------------------ SUBTITLES ---------------------------
     collect_subs "$folder"
@@ -298,11 +334,32 @@ for folder in "${!MAIN_VIDEO[@]}"; do
             continue
         fi
 
+        # Several videos could be the feature and this subtitle names
+        # none of them. The largest is a guess, and often the old copy.
+        if [ "$nfeatures" -gt 1 ] \
+           && [ "$AMBIGUOUS_SUBS_TO_LARGEST" != "true" ] \
+           && [ "${SUFFIX_REMAINDER,,}" != "${main_name,,}" ]; then
+            log "[SUB SKIP ambiguous - folder has $nfeatures videos] $sub"
+            sub_skip_ambig=$((sub_skip_ambig + 1))
+            continue
+        fi
+
         finish_subtitle "$sub" "$main_name" "$folder"
     done
 
     # ------------------ Subs/ SUBFOLDER ---------------------
-    [ "$PROMOTE_SUBS_FOLDER" = "true" ] && promote_subs_folder "$folder" "$main_name"
+    if [ "$PROMOTE_SUBS_FOLDER" = "true" ]; then
+        if [ "$nfeatures" -gt 1 ] && [ "$AMBIGUOUS_SUBS_TO_LARGEST" != "true" ]; then
+            # Same question as above: which of the videos is "the film"?
+            for child in "$folder"/*/; do
+                is_subs_subfolder "${child%/}" || continue
+                log "[SUBS FOLDER SKIP ambiguous - folder has $nfeatures videos] ${child%/}"
+                subs_folder_skip=$((subs_folder_skip + 1))
+            done
+        else
+            promote_subs_folder "$folder" "$main_name"
+        fi
+    fi
 
     # ------------------ TRICKPLAY FOLDERS -------------------
     shopt -s nullglob
@@ -377,10 +434,13 @@ fi
 # Last, so anything quarantined by this run is already in place.
 trash_prune_pass
 
+dup_report_finish
 UNIT_COUNT="$folder_count"
 if [ "$RESPECT_EXTRA_SUBS" = "true" ]; then
     SUMMARY_EXTRA+=("Subtitles skipped (extra):|$sub_skip_extra")
 fi
+SUMMARY_EXTRA+=("Subtitles skipped (ambiguous):|$sub_skip_ambig")
+SUMMARY_EXTRA+=("Folders with several videos:|$DUP_GROUPS")
 if [ "$subs_folder_skip" -gt 0 ]; then
     SUMMARY_EXTRA+=("Subs/ left in place:|$subs_folder_skip")
 fi

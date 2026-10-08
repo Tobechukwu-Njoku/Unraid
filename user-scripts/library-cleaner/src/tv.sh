@@ -206,6 +206,13 @@ LOCK_FILE="/var/lock/library-cleaner-tv.lock"
 # anything else you put under TRASH_DIR is left alone.
 TRASH_KEEP_DAYS="30"
 
+# Episodes with more than one video file - usually an old copy left
+# beside a new one - are listed here with each file's size, largest
+# first, rewritten on every run (dry runs included). Their subtitles
+# and trickplay are left alone, since there's no telling which copy
+# they belong to. Set to "" to skip the report.
+DUPLICATES_REPORT="/mnt/user/appdata/subtitle_renamer/duplicates_tv.txt"
+
 # --------------------- END CONFIGURATION --------------------
 
 SCRIPT_TITLE="Library Cleaner - TV"
@@ -281,11 +288,13 @@ while IFS= read -r -d '' d; do
 done < <(find "${FIND_OPTS[@]}" "${ROOTS[@]}" -mindepth 2 -maxdepth 2 -type d -print0)
 
 log " Season folders found: ${#season_folders[@]}"
+dup_report_init "Episodes with more than one video file, by season. Usually an old copy beside the current one."
 
 for season in "${season_folders[@]}"; do
     # Map: SxxExx -> path of episode video. Also flag duplicates.
     declare -A EP_VIDEO=()
     declare -A EP_DUP=()
+    declare -A EP_ALL=()
     declare -A vid_bases=()
 
     collect_video_bases "$season"
@@ -297,9 +306,9 @@ for season in "${season_folders[@]}"; do
             extract_ep_tokens "${v##*/}"
             [ "${#EP_TOKENS[@]}" -eq 0 ] && continue
             for tok in "${EP_TOKENS[@]}"; do
+                EP_ALL["$tok"]+="$v"$'\n'
                 if [ -n "${EP_VIDEO[$tok]:-}" ]; then
                     EP_DUP["$tok"]=1
-                    log "[EP DUPLICATE] $tok in $season"
                 else
                     EP_VIDEO["$tok"]="$v"
                 fi
@@ -307,6 +316,16 @@ for season in "${season_folders[@]}"; do
         done
     done
     shopt -u nullglob nocaseglob
+
+    # Report each duplicated episode once, with every file claiming it.
+    if [ "${#EP_DUP[@]}" -gt 0 ]; then
+        mapfile -t dup_toks < <(printf '%s\n' "${!EP_DUP[@]}" | sort)
+        for tok in "${dup_toks[@]}"; do
+            mapfile -t dup_vids < <(printf '%s' "${EP_ALL[$tok]}")
+            log "[EP DUPLICATE] $tok in $season"
+            dup_report_group "$season - $tok" "${dup_vids[@]}"
+        done
+    fi
 
     # ---------- SUBTITLES in this season folder -------------
     collect_subs "$season"
@@ -411,7 +430,7 @@ for season in "${season_folders[@]}"; do
     [ "$DELETE_OUTLIER_NFO" = "true" ] && nfo_pass "$season" "season.nfo"
     [ "$DELETE_OUTLIER_ART" = "true" ] && art_pass "$season"
 
-    unset EP_VIDEO EP_DUP vid_bases
+    unset EP_VIDEO EP_DUP EP_ALL vid_bases
 done
 
 [ "$DELETE_JUNK" = "true" ] && junk_pass
@@ -420,6 +439,7 @@ done
 # Last, so anything quarantined by this run is already in place.
 trash_prune_pass
 
+dup_report_finish
 UNIT_COUNT="${#season_folders[@]}"
 SUMMARY_EXTRA+=("Subtitles skipped (no episode):|$sub_skip_noep")
 SUMMARY_EXTRA+=("Trickplay already correct:|$tp_skip_noop")
@@ -428,4 +448,5 @@ SUMMARY_EXTRA+=("Trickplay skipped (no episode):|$tp_skip_noep")
 SUMMARY_EXTRA+=("Trickplay skipped (ambiguous):|$tp_skip_ambig")
 SUMMARY_EXTRA+=("Trickplay skipped (lost match):|$tp_skip_lost")
 SUMMARY_EXTRA+=("Skipped (ambiguous duplicate):|$ep_ambig")
+SUMMARY_EXTRA+=("Episodes with several videos:|$DUP_GROUPS")
 print_summary

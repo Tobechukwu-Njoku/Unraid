@@ -31,6 +31,38 @@ The film script picks the **largest video in the folder** as the feature. The TV
 script instead pairs each file to an episode by the `SxxExx` token in its name,
 because a season folder holds many videos.
 
+When a film folder holds **more than one feature-length video** — usually an old
+copy left beside the current one — "the largest" is a guess, and often the wrong
+one: it's frequently the old copy. A subtitle that names none of the videos is
+then left alone and logged as ambiguous, the same way trickplay already was.
+Videos named as Jellyfin extras (`-trailer`, `-featurette`, …) don't count, so a
+film beside its trailer is unaffected. Set `AMBIGUOUS_SUBS_TO_LARGEST="true"` to
+pair them with the largest anyway.
+
+## Duplicates report
+
+Every run, dry runs included, rewrites a plain list of what looks duplicated,
+with sizes, so you can clear old copies out in Radarr or Sonarr:
+
+- **Film** (`duplicates_film.txt`): folders holding more than one feature-length
+  video.
+- **TV** (`duplicates_tv.txt`): episodes with more than one video file. Their
+  subtitles and trickplay are skipped, since there's no telling which copy they
+  belong to.
+
+For example (sizes illustrative):
+
+```
+Jurassic Park (1993) {tmdb-329}
+    11.2 GiB  Jurassic Park (1993) [tmdbid-329] - [Bluray-1080p 10bit x265]{imdb-tt0107290}-Radarr.mkv
+     8.4 GiB  Jurassic Park (1993) [Bluray-1080p 10bit h265 AAC]{edition-Remastered}-Remastered.mkv
+
+# 1 group. Files other than the largest in each total 8.4 GiB.
+```
+
+Not every entry is a mistake: Jellyfin can deliberately keep several versions of
+a film in one folder. The report only lists them; it never removes anything.
+
 When a folder holds stale trickplay from **more than one** earlier release, all
 wanting the same name, the one whose release group (then quality tag) matches
 the video wins:
@@ -78,6 +110,9 @@ deleted in a dry run.
 | `MAX_SUFFIX_PARTS` | How many trailing dot-components may be peeled off a subtitle name. |
 | `STRIP_HI` | Drop a trailing `.hi` — but only when another component precedes it, so a lone `.hi` (possibly Hindi) survives. |
 | `RESPECT_EXTRA_SUBS` | **Film only, default `"true"`.** A subtitle whose name (minus its language suffix) matches a *different* video in the folder is left alone. Without it, `Film-behindthescenes.en.srt` is renamed onto the feature film and lost. |
+| `AMBIGUOUS_SUBS_TO_LARGEST` | **Film only, default `"false"`.** In a folder with more than one feature-length video, a subtitle naming none of them is left alone. `"true"` pairs it with the largest video, as older versions did. |
+| `EXTRA_VIDEO_SUFFIXES` | **Film only.** Jellyfin extras suffixes (`trailer`, `featurette`, …) whose videos never count as a second feature. Short words like `scene` are left out on purpose: they're also release-group names. |
+| `DUPLICATES_REPORT` | Where the duplicates report is written, rewritten every run. `""` turns it off. |
 | `SEASON_DIR_REGEX` | **TV only.** Which subfolders count as season folders. Empty string scans every subfolder. |
 | `EXTRA_LANG_CODES` | Extra language codes beyond the built-in ISO 639-1 and 639-2 sets. Only whitelisted codes are treated as languages, so release tags like `WEB`, `DDP` and `HDR` are not mistaken for one. |
 | `DUPLICATE_KEEP` | Which file survives when a rename target already exists and `DELETE_DUPLICATES` is on: `largest` (default) or `existing`. A rename keeps the subtitle's extension, so a collision is always between two files of the same format. |
@@ -128,19 +163,20 @@ removed, and it's the thing you'd restore from — but it's pruned on a
 **Film** — one folder per movie, at any depth under a root. `Films/Film (2020)/`
 and `Films/4K/Film (2020)/` both work.
 
-> ⚠️ Prefer one folder per movie. In a **flat** folder of loose films the whole
-> folder is treated as a single group and the largest file is taken as the
-> feature. `RESPECT_EXTRA_SUBS` (on by default) then protects every subtitle
-> whose name matches one of the videos, so a tidily-named flat folder mostly
-> survives — but a subtitle matching *no* video is renamed onto the largest
-> film, which in a flat folder means it lands on the wrong one:
+> Prefer one folder per movie. A **flat** folder of loose films is treated as a
+> single group, so nothing in it is ever renamed onto the right film: a subtitle
+> naming one of the videos is kept with it, and one naming none of them is left
+> alone as ambiguous. The folder is also listed in the duplicates report.
 >
 > ```
-> Film A (2020).en.srt   kept          matches Film A (2020).mkv
-> Film B (2021).en.srt   kept          matches Film B (2021).mkv
-> Film C (2022).fr.srt   kept          matches Film C (2022).mkv
-> Film.C.2022.WEB.srt    -> Film A (2020).srt    matched nothing
+> Film A (2020).en.srt   kept   matches Film A (2020).mkv
+> Film B (2021).en.srt   kept   matches Film B (2021).mkv
+> Film C (2022).fr.srt   kept   matches Film C (2022).mkv
+> Film.C.2022.WEB.srt    kept   matches nothing - ambiguous
 > ```
+>
+> With `AMBIGUOUS_SUBS_TO_LARGEST="true"` that last one goes to the largest
+> film instead, which in a flat folder means the wrong one.
 
 **TV** — strictly `<ROOT>/<Show>/<Season NN>/`. Season folders must match
 `SEASON_DIR_REGEX`, which by default accepts `Season 01`, `Season01`, `Season_1`,

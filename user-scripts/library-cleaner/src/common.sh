@@ -104,6 +104,14 @@ GENERIC_ART_RE=""
 for n in "${GENERIC_ART_NAMES[@]}"; do GENERIC_ART_RE+="|$n"; done
 GENERIC_ART_RE="^(${GENERIC_ART_RE:1})[0-9]*$"
 
+# Jellyfin extras suffixes, for scripts that define them (film).
+EXTRA_VIDEO_RE=""
+if [ -n "${EXTRA_VIDEO_SUFFIXES+x}" ]; then
+    for n in "${EXTRA_VIDEO_SUFFIXES[@]}"; do EXTRA_VIDEO_RE+="|${n,,}"; done
+    [ -n "$EXTRA_VIDEO_RE" ] \
+        && EXTRA_VIDEO_RE="(^|[-._ ])(${EXTRA_VIDEO_RE:1})[0-9]*\$"
+fi
+
 ART_SUFFIX_RE=""
 for n in "${ART_SUFFIXES[@]}"; do ART_SUFFIX_RE+="|$n"; done
 ART_SUFFIX_RE="^(${ART_SUFFIX_RE:1})[0-9]*$"
@@ -641,6 +649,7 @@ collect_subs() {
 # caller's `vid_bases` associative array.
 collect_video_bases() {
     local folder="$1" ext v vb
+    FEATURE_VIDEOS=()
     shopt -s nullglob nocaseglob
     for ext in "${VIDEO_EXTS[@]}"; do
         for v in "$folder"/*."$ext"; do
@@ -648,6 +657,11 @@ collect_video_bases() {
             vb="${v##*/}"
             vb="${vb%.*}"
             vid_bases["${vb,,}"]=1
+            # Everything that isn't named as an extra could be the
+            # feature, which is what the ambiguity checks care about.
+            if [ -z "$EXTRA_VIDEO_RE" ] || ! [[ "${vb,,}" =~ $EXTRA_VIDEO_RE ]]; then
+                FEATURE_VIDEOS+=("$v")
+            fi
         done
     done
     shopt -u nullglob nocaseglob
@@ -932,6 +946,77 @@ trash_prune_pass() {
     shopt -u nullglob
 }
 
+# ---------- Duplicates report -------------------------------
+# A plain-text list of every group of videos that could be the same
+# thing, with sizes, so the copies can be reviewed and cleared out in
+# Radarr / Sonarr. Rewritten on every run, dry runs included.
+DUP_GROUPS=0
+DUP_SPARE_BYTES=0
+
+# Bytes as a short human-readable size, into HUMAN_SIZE.
+human_size() {
+    local b="$1"
+    if [ "$b" -ge 1073741824 ]; then
+        printf -v HUMAN_SIZE '%d.%d GiB' $((b / 1073741824)) $(( (b % 1073741824) * 10 / 1073741824 ))
+    elif [ "$b" -ge 1048576 ]; then
+        printf -v HUMAN_SIZE '%d.%d MiB' $((b / 1048576)) $(( (b % 1048576) * 10 / 1048576 ))
+    else
+        printf -v HUMAN_SIZE '%d KiB' $((b / 1024))
+    fi
+}
+
+# Start the report. $1 is a one-line description of what it lists.
+dup_report_init() {
+    [ -n "${DUPLICATES_REPORT:-}" ] || return 0
+    mkdir -p "$(dirname "$DUPLICATES_REPORT")" 2>/dev/null
+    if ! {
+        printf '# %s - %s\n' "$SCRIPT_TITLE" "$(date '+%Y-%m-%d %H:%M:%S')"
+        printf '# %s\n' "$1"
+        printf '# Sizes are per file, largest first.\n\n'
+    } > "$DUPLICATES_REPORT" 2>/dev/null; then
+        log " WARNING: cannot write $DUPLICATES_REPORT - no duplicates report"
+        DUPLICATES_REPORT=""
+    fi
+}
+
+# Add one group: a heading, then the videos in it.
+dup_report_group() {
+    local heading="$1" v s total=0 largest=0 lines=()
+    shift
+    DUP_GROUPS=$((DUP_GROUPS + 1))
+    for v in "$@"; do
+        s="$(file_size "$v")"
+        lines+=("$s"$'\t'"$v")
+        total=$((total + s))
+        [ "$s" -gt "$largest" ] && largest="$s"
+    done
+    DUP_SPARE_BYTES=$((DUP_SPARE_BYTES + total - largest))
+    [ -n "${DUPLICATES_REPORT:-}" ] || return 0
+    {
+        printf '%s\n' "$heading"
+        printf '%s\n' "${lines[@]}" | sort -t$'\t' -k1,1nr \
+            | while IFS=$'\t' read -r s v; do
+                human_size "$s"
+                printf '  %10s  %s\n' "$HUMAN_SIZE" "${v##*/}"
+            done
+        printf '\n'
+    } >> "$DUPLICATES_REPORT"
+}
+
+# Close the report with a total, and point the log at it.
+dup_report_finish() {
+    [ -n "${DUPLICATES_REPORT:-}" ] || return 0
+    human_size "$DUP_SPARE_BYTES"
+    if [ "$DUP_GROUPS" -eq 0 ]; then
+        printf 'None found.\n' >> "$DUPLICATES_REPORT"
+    else
+        local noun="groups"
+        [ "$DUP_GROUPS" -eq 1 ] && noun="group"
+        printf '# %d %s. Files other than the largest in each total %s.\n' \
+            "$DUP_GROUPS" "$noun" "$HUMAN_SIZE" >> "$DUPLICATES_REPORT"
+    fi
+}
+
 # Log one "label value" summary line, phrased for dry-run or not.
 summary_line() {
     local label="$1" value="$2"
@@ -1017,6 +1102,10 @@ print_summary() {
         fi
     fi
     summary_line "Errors:" "$error_count"
+    if [ "$DUP_GROUPS" -gt 0 ] && [ -n "${DUPLICATES_REPORT:-}" ]; then
+        log " Duplicate videos are listed in:"
+        log "   $DUPLICATES_REPORT"
+    fi
     if [ -n "$TRASH_RUN_DIR" ]; then
         log " Quarantined files are under:"
         log "   $TRASH_RUN_DIR"

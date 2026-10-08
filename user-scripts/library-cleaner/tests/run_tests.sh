@@ -1155,6 +1155,130 @@ done
 
 
 # =====================================================================
+#  SEVERAL FEATURE-LENGTH VIDEOS IN ONE FOLDER
+#  From a real dry run: the largest file in the folder was the OLD
+#  copy, so "pair with the largest" sent a subtitle the wrong way.
+# =====================================================================
+echo
+echo "=== SEVERAL VIDEOS ================================================="
+jp_old="Jurassic Park (1993) [tmdbid-329] - [Bluray-1080p 10bit x265]{imdb-tt0107290}-Radarr"
+jp_new="Jurassic Park (1993) [Bluray-1080p 10bit h265 AAC]{edition-Remastered}-Remastered"
+mv_fixture() {
+    rm -rf "$WORK/mv"
+    local d="$WORK/mv/Jurassic Park (1993) {tmdb-329}"
+    mkdir -p "$d/Subs"
+    head -c 6000 /dev/zero > "$d/$jp_old.mkv"        # larger, and old
+    head -c 4000 /dev/zero > "$d/$jp_new.mkv"
+    : > "$d/$jp_new.Park (1993) [tmdbid-329] - [Bluray-1080p 10bit x265]{imdb-tt0107290}-Radarr.en.srt"
+    : > "$d/$jp_new.nl.srt"                          # names a video: extra guard
+    : > "$d/Subs/2_French.srt"
+    # A film beside its trailer is NOT two features.
+    local t="$WORK/mv/Film T (2020)"
+    mkdir -p "$t"
+    head -c 6000 /dev/zero > "$t/Film T (2020)-Radarr.mkv"
+    head -c 300  /dev/zero > "$t/Film T (2020)-trailer.mkv"
+    : > "$t/Film T (2020) [old]-Radarr.en.srt"
+}
+jd="$WORK/mv/Jurassic Park (1993) {tmdb-329}"
+mv_fixture
+cat > "$WORK/ov_mv" <<OV
+ROOT_DIRS=("$WORK/mv")
+DRY_RUN="false"
+ENABLE_LOG="true"
+LOG_FILE="$WORK/mv.log"
+TRASH_DIR=""
+LOCK_FILE=""
+DUPLICATES_REPORT="$WORK/dups_film.txt"
+OV
+gen "$REPO/Library Cleaner Film" "$WORK/mv.sh" "$WORK/ov_mv"
+"$WORK/mv.sh" > "$WORK/mv.out" 2>&1
+
+[ -f "$jd/$jp_new.Park (1993) [tmdbid-329] - [Bluray-1080p 10bit x265]{imdb-tt0107290}-Radarr.en.srt" ] \
+  && [ ! -e "$jd/$jp_old.en.srt" ] \
+    && ok "a subtitle naming neither video is not sent to the largest" \
+    || bad "the ambiguous subtitle was paired with the old copy"
+grep -q "SUB SKIP ambiguous - folder has 2 videos" "$WORK/mv.out" \
+    && ok "logs it as ambiguous" || bad "no ambiguous log line"
+[ -f "$jd/$jp_new.nl.srt" ] \
+    && ok "a subtitle naming one of the videos is still left with it" \
+    || bad "the extra guard stopped working"
+[ -f "$jd/Subs/2_French.srt" ] \
+    && ok "a Subs/ folder is not promoted onto a guess either" \
+    || bad "Subs/ was promoted despite two videos"
+[ -f "$WORK/mv/Film T (2020)/Film T (2020)-Radarr.en.srt" ] \
+    && ok "a trailer doesn't count as a second feature" \
+    || bad "film + trailer was treated as ambiguous"
+
+if [ -f "$WORK/dups_film.txt" ]; then
+    ok "duplicates report written"
+    first="$(grep -A1 -F "$jd" "$WORK/dups_film.txt" | sed -n 2p)"
+    case "$first" in
+        *"$jp_old.mkv") ok "report lists the largest file first, with its size" ;;
+        *)              bad "report order wrong: $first" ;;
+    esac
+    grep -qF "$jp_new.mkv" "$WORK/dups_film.txt" \
+        && ok "report lists the other copy" || bad "report misses the other copy"
+    grep -q "Film T" "$WORK/dups_film.txt" \
+        && bad "report lists a film beside its trailer" \
+        || ok "report leaves out a film beside its trailer"
+    grep -q "^# 1 group\. .* total 3 KiB" "$WORK/dups_film.txt" \
+        && ok "report totals the space outside the largest copies" \
+        || bad "report total wrong: $(tail -1 "$WORK/dups_film.txt")"
+else
+    bad "no duplicates report written"
+fi
+grep -qE "Folders with several videos: *1$" "$WORK/mv.out" \
+    && ok "summary counts the folder" || bad "summary count missing"
+
+# The old behaviour is one setting away.
+mv_fixture
+sed 's|^DUPLICATES_REPORT=.*|AMBIGUOUS_SUBS_TO_LARGEST="true"|' "$WORK/ov_mv" > "$WORK/ov_mv2"
+gen "$REPO/Library Cleaner Film" "$WORK/mv2.sh" "$WORK/ov_mv2"
+"$WORK/mv2.sh" > /dev/null 2>&1
+[ -f "$jd/$jp_old.en.srt" ] \
+    && ok "AMBIGUOUS_SUBS_TO_LARGEST=true pairs with the largest, as before" \
+    || bad "AMBIGUOUS_SUBS_TO_LARGEST=true did not restore the old pairing"
+
+# A dry run writes the report too - it's read-only as far as media goes.
+mv_fixture; rm -f "$WORK/dups_dry.txt"
+sed -e 's|^DRY_RUN=.*|DRY_RUN="true"|' -e "s|^DUPLICATES_REPORT=.*|DUPLICATES_REPORT=\"$WORK/dups_dry.txt\"|" \
+    "$WORK/ov_mv" > "$WORK/ov_mv3"
+gen "$REPO/Library Cleaner Film" "$WORK/mv3.sh" "$WORK/ov_mv3"
+"$WORK/mv3.sh" > /dev/null 2>&1
+grep -qF "$jp_old.mkv" "$WORK/dups_dry.txt" 2>/dev/null \
+    && ok "dry run writes the duplicates report" || bad "dry run wrote no report"
+
+# TV: two files for one episode.
+rm -rf "$WORK/dtv"; ds="$WORK/dtv/Show/Season 01"; mkdir -p "$ds"
+head -c 5000 /dev/zero > "$ds/Show - S01E01 - Pilot [WEBDL-1080p 8bit h264]-NTb.mkv"
+head -c 2000 /dev/zero > "$ds/Show [tvdbid-1] - S01E01 - Pilot [HDTV-720p 8bit x264]-LOL.mkv"
+head -c 5000 /dev/zero > "$ds/Show - S01E02 - Second [WEBDL-1080p 8bit h264]-NTb.mkv"
+cat > "$WORK/ov_dtv" <<OV
+ROOT_DIRS=("$WORK/dtv")
+DRY_RUN="true"
+ENABLE_LOG="true"
+LOG_FILE="$WORK/dtv.log"
+TRASH_DIR=""
+LOCK_FILE=""
+DUPLICATES_REPORT="$WORK/dups_tv.txt"
+OV
+gen "$REPO/Library Cleaner TV" "$WORK/dtv.sh" "$WORK/ov_dtv"
+"$WORK/dtv.sh" > "$WORK/dtv.out" 2>&1
+tvfirst="$(grep -A1 -F "$ds - S01E01" "$WORK/dups_tv.txt" 2>/dev/null | sed -n 2p)"
+case "$tvfirst" in
+    *"4 KiB  Show - S01E01 - Pilot [WEBDL-1080p 8bit h264]-NTb.mkv") ok "tv report lists both copies of the episode, largest first" ;;
+    *) bad "tv report wrong: ${tvfirst:-<missing>}" ;;
+esac
+grep -qF "LOL.mkv" "$WORK/dups_tv.txt" 2>/dev/null \
+    && ok "tv report includes the old copy" || bad "tv report misses the old copy"
+grep -q "S01E02" "$WORK/dups_tv.txt" 2>/dev/null \
+    && bad "tv report lists an episode that has one file" \
+    || ok "tv report leaves single-file episodes out"
+grep -qE "Episodes with several videos: *1$" "$WORK/dtv.out" \
+    && ok "tv summary counts the episode" || bad "tv summary count missing"
+
+
+# =====================================================================
 #  BUILD FRESHNESS
 #  The scripts at the repo root are generated from src/ by build.sh.
 #  Catch the case where src/ was edited but build.sh was not re-run.
