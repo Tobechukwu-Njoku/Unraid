@@ -230,10 +230,18 @@ ep_ambig=0
 # by only its first token left the others unclaimed - their
 # subtitles looked orphaned and were deleted.
 #
-#   Show - S01E01 - Title      -> S01E01
-#   Show - S01E01-E02 - Double -> S01E01 S01E02
-#   Show - S01E01E02 - Double  -> S01E01 S01E02
-#   Show - S01E01-03 - Triple  -> S01E01 S01E02 S01E03
+#   Show - S01E01 - Title           -> S01E01
+#   Show - S01E01-E02 - Double      -> S01E01 S01E02
+#   Show - S01E01E02 - Double       -> S01E01 S01E02
+#   Show - S01E01-03 - Triple       -> S01E01 S01E02 S01E03
+#   Show.S02E04-E14.Segments.mkv    -> S02E04 S02E14
+#
+# A written "E" before each number lists episodes; it does not span
+# them. Scene releases of segmented shows pair episodes that aren't
+# adjacent, and filling the gap made one Teen Titans Go! file claim
+# eleven episodes and invent dozens of duplicates. Only the bare
+# "-NN" form is a range. The cost: Sonarr's "Prefixed Range" style,
+# S01E01-E03, now claims 1 and 3 but not 2.
 extract_ep_tokens() {
     local name="$1" season first width tail matched n i tok
     EP_TOKENS=()
@@ -259,10 +267,15 @@ extract_ep_tokens() {
         fi
         [ "$n" -gt "$first" ] || break
         [ $((n - first)) -le 50 ] || break
-        for ((i = first + 1; i <= n; i++)); do
-            printf -v tok 'S%02dE%02d' "$season" "$i"
+        if [ "${BASH_REMATCH[1]}" = "-" ]; then
+            for ((i = first + 1; i <= n; i++)); do
+                printf -v tok 'S%02dE%02d' "$season" "$i"
+                EP_TOKENS+=("$tok")
+            done
+        else
+            printf -v tok 'S%02dE%02d' "$season" "$n"
             EP_TOKENS+=("$tok")
-        done
+        fi
         first="$n"
         tail="${tail#"$matched"}"
     done

@@ -1279,6 +1279,103 @@ grep -qE "Episodes with several videos: *1$" "$WORK/dtv.out" \
 
 
 # =====================================================================
+#  WHAT THE FIRST DUPLICATES REPORTS GOT WRONG
+#  Found by reading the reports from a full-library rescan.
+# =====================================================================
+echo
+echo "=== REPORT ACCURACY ================================================"
+
+# 1. "S02E04-E14" lists two episodes; it isn't a range. Filling the gap
+#    made one Teen Titans Go! file claim eleven episodes.
+rm -rf "$WORK/tt"; ts="$WORK/tt/Teen Titans Go!/Season 02"; mkdir -p "$ts"
+head -c 4000 /dev/zero > "$ts/Teen Titans Go! - S02E04 - Sandwich Thief [WEBDL-1080p]-Lahey.mkv"
+head -c 4000 /dev/zero > "$ts/Teen Titans Go! - S02E07 - Other Episode [WEBDL-1080p]-Lahey.mkv"
+head -c 3000 /dev/zero > "$ts/Teen.Titans.Go!.S02E04-E14.Sandwich.Thief.Money.Grandma.1080p-Lahey.mkv"
+: > "$ts/Teen Titans Go! - S02E07 - Other Episode [old].en.srt"
+cat > "$WORK/ov_tt" <<OV
+ROOT_DIRS=("$WORK/tt")
+DRY_RUN="false"
+ENABLE_LOG="true"
+LOG_FILE="$WORK/tt.log"
+TRASH_DIR=""
+LOCK_FILE=""
+DUPLICATES_REPORT="$WORK/dups_tt.txt"
+OV
+gen "$REPO/Library Cleaner TV" "$WORK/tt.sh" "$WORK/ov_tt"
+"$WORK/tt.sh" > "$WORK/tt.out" 2>&1
+grep -q "S02E07" "$WORK/dups_tt.txt" \
+    && bad "an episode between two listed ones was claimed as a duplicate" \
+    || ok "E04-E14 lists two episodes; it doesn't claim E05..E13"
+grep -q "Season 02 - S02E04" "$WORK/dups_tt.txt" \
+    && ok "the genuine duplicate (E04 twice) is still reported" \
+    || bad "lost the genuine E04 duplicate"
+[ -f "$ts/Teen Titans Go! - S02E07 - Other Episode [WEBDL-1080p]-Lahey.en.srt" ] \
+    && ok "the episode in the gap is processed normally again" \
+    || bad "the episode in the gap was still skipped"
+
+# 2. Jellyfin extras folders are not duplicates.
+rm -rf "$WORK/ex"; ef="$WORK/ex/The Red Turtle (2016)"; mkdir -p "$ef/Featurettes/Short Films"
+head -c 9000 /dev/zero > "$ef/The Red Turtle (2016)-Radarr.mkv"
+head -c 3000 /dev/zero > "$ef/Featurettes/Making Of.mkv"
+head -c 2000 /dev/zero > "$ef/Featurettes/Talks with Director.mkv"
+head -c 1000 /dev/zero > "$ef/Featurettes/Short Films/Father and Daughter (2000).mkv"
+head -c 1000 /dev/zero > "$ef/Featurettes/Short Films/Tom Sweep (1992).mkv"
+cat > "$WORK/ov_ex" <<OV
+ROOT_DIRS=("$WORK/ex")
+DRY_RUN="true"
+ENABLE_LOG="false"
+TRASH_DIR=""
+LOCK_FILE=""
+DUPLICATES_REPORT="$WORK/dups_ex.txt"
+OV
+gen "$REPO/Library Cleaner Film" "$WORK/ex.sh" "$WORK/ov_ex"
+"$WORK/ex.sh" > /dev/null 2>&1
+grep -q "None found" "$WORK/dups_ex.txt" \
+    && ok "extras folders (and folders below them) are not reported" \
+    || bad "extras listed as duplicates: $(grep -c . "$WORK/dups_ex.txt") lines"
+
+# 3. Two names for one file look identical to a duplicate, but deleting
+#    either frees nothing.
+rm -rf "$WORK/hl" "$WORK/hl-downloads"; hf="$WORK/hl/An Unexpected Valentine (2025)"; mkdir -p "$hf" "$WORK/hl-downloads"
+head -c 7000 /dev/zero > "$hf/An Unexpected Valentine (2025) [WEBDL-1080p 8bit h264 EAC3]-MADSKY.mkv"
+ln "$hf/An Unexpected Valentine (2025) [WEBDL-1080p 8bit h264 EAC3]-MADSKY.mkv" \
+   "$hf/An Unexpected Valentine (2025) [tmdbid-1414160] - [WEBDL-1080p 8bit h264]{imdb-tt35304903}-MADSKY.mkv"
+# A real second copy, and one that is also linked from a downloads folder.
+hg="$WORK/hl/Righteous Kill (2008)"; mkdir -p "$hg"
+head -c 6000 /dev/zero > "$hg/Righteous Kill (2008) [WEBDL-1080p]-ADDICTION.mkv"
+head -c 5000 /dev/zero > "$hg/Righteous Kill (2008) [tmdbid-13389] - [WEBDL-1080p]-ADDICTION.mkv"
+head -c 2048 /dev/zero > "$hg/Righteous Kill (2008) [HDTV-720p]-OLD.mkv"
+ln "$hg/Righteous Kill (2008) [HDTV-720p]-OLD.mkv" "$WORK/hl-downloads/seeding.mkv"
+cat > "$WORK/ov_hl" <<OV
+ROOT_DIRS=("$WORK/hl")
+DRY_RUN="true"
+ENABLE_LOG="false"
+TRASH_DIR=""
+LOCK_FILE=""
+DUPLICATES_REPORT="$WORK/dups_hl.txt"
+OV
+gen "$REPO/Library Cleaner Film" "$WORK/hl.sh" "$WORK/ov_hl"
+"$WORK/hl.sh" > /dev/null 2>&1
+grep -A3 -F "$hf" "$WORK/dups_hl.txt" | grep -q "same file as above (hardlink)" \
+    && ok "a hardlinked second name is marked as the same file" \
+    || bad "hardlink not recognised"
+grep -A6 -F "$hg" "$WORK/dups_hl.txt" | grep -q "also linked elsewhere (2 links)" \
+    && ok "a copy also linked from elsewhere is marked" \
+    || bad "external link not recognised"
+grep -A6 -F "$hg" "$WORK/dups_hl.txt" | grep -q "^ .*4 KiB  Righteous Kill (2008) \[tmdbid-13389\]" \
+    && ok "a real second copy carries no hardlink note" \
+    || bad "real copy listed wrongly"
+# Spare = 6.8 KiB (hardlink) + 4.8 KiB (copy) + 2 KiB (linked elsewhere).
+# Freeable = only the real copy, 5000 bytes -> 4 KiB.
+grep -q "^# Of that, 4 KiB is in files with no other link" "$WORK/dups_hl.txt" \
+    && ok "freeable total counts only files deleting would actually free" \
+    || bad "freeable total wrong: $(grep '^# Of that' "$WORK/dups_hl.txt")"
+grep -q "^# 2 groups\. .* total 13 KiB" "$WORK/dups_hl.txt" \
+    && ok "the plain total still covers every non-largest file" \
+    || bad "plain total wrong: $(grep '^# [0-9]* group' "$WORK/dups_hl.txt")"
+
+
+# =====================================================================
 #  BUILD FRESHNESS
 #  The scripts at the repo root are generated from src/ by build.sh.
 #  Catch the case where src/ was edited but build.sh was not re-run.

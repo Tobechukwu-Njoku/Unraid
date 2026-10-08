@@ -50,18 +50,35 @@ with sizes, so you can clear old copies out in Radarr or Sonarr:
   subtitles and trickplay are skipped, since there's no telling which copy they
   belong to.
 
-For example (sizes illustrative):
+For example (real names and sizes; which file is a hardlink is illustrative):
 
 ```
+An Unexpected Valentine (2025) {tmdb-1414160}
+     3.0 GiB  An Unexpected Valentine (2025) [WEBDL-1080p 8bit h264 EAC3]-MADSKY.mkv
+     3.0 GiB  An Unexpected Valentine (2025) [tmdbid-1414160] - [WEBDL-1080p 8bit h264]{imdb-tt35304903}-MADSKY.mkv
+                ^ same file as above (hardlink) - deleting it frees nothing
+
 Jurassic Park (1993) {tmdb-329}
-    11.2 GiB  Jurassic Park (1993) [tmdbid-329] - [Bluray-1080p 10bit x265]{imdb-tt0107290}-Radarr.mkv
-     8.4 GiB  Jurassic Park (1993) [Bluray-1080p 10bit h265 AAC]{edition-Remastered}-Remastered.mkv
+     6.3 GiB  Jurassic Park (1993) [tmdbid-329] - [Bluray-1080p 10bit x265]{imdb-tt0107290}-Radarr.mkv
+     1.9 GiB  Jurassic Park (1993) [Bluray-1080p 10bit h265 AAC]{edition-Remastered}-Remastered.mp4
 
-# 1 group. Files other than the largest in each total 8.4 GiB.
+# 2 groups. Files other than the largest in each total 4.9 GiB.
+# Of that, 1.9 GiB is in files with no other link - space deleting them would free.
 ```
 
-Not every entry is a mistake: Jellyfin can deliberately keep several versions of
-a film in one folder. The report only lists them; it never removes anything.
+Read it with three things in mind:
+
+- **Largest first is not advice to keep the largest.** Above, the larger Jurassic
+  Park file carries Radarr's *old* naming; the current one is probably the `.mp4`.
+  Check which file Radarr or Sonarr tracks before deleting anything.
+- **Hardlinks are marked.** A second name for the same data is flagged, and so is
+  a file also linked from elsewhere (a downloads folder that is still seeding, for
+  example). Deleting either frees no space, so the closing line separates the
+  plain total from what deleting would actually free.
+- **Not every entry is a mistake.** Jellyfin can deliberately keep several
+  versions of a film in one folder. The report only lists; it never removes
+  anything. Jellyfin extras folders (`Extras/`, `Featurettes/`, `Scenes/`, …) are
+  left out entirely.
 
 When a folder holds stale trickplay from **more than one** earlier release, all
 wanting the same name, the one whose release group (then quality tag) matches
@@ -113,6 +130,7 @@ deleted in a dry run.
 | `AMBIGUOUS_SUBS_TO_LARGEST` | **Film only, default `"false"`.** In a folder with more than one feature-length video, a subtitle naming none of them is left alone. `"true"` pairs it with the largest video, as older versions did. |
 | `EXTRA_VIDEO_SUFFIXES` | **Film only.** Jellyfin extras suffixes (`trailer`, `featurette`, …) whose videos never count as a second feature. Short words like `scene` are left out on purpose: they're also release-group names. |
 | `DUPLICATES_REPORT` | Where the duplicates report is written, rewritten every run. `""` turns it off. |
+| `EXTRAS_FOLDERS` | **Film only.** Jellyfin extras folder names (`Extras`, `Featurettes`, `Scenes`, …). Anything at or below one is never listed in the duplicates report. |
 | `SEASON_DIR_REGEX` | **TV only.** Which subfolders count as season folders. Empty string scans every subfolder. |
 | `EXTRA_LANG_CODES` | Extra language codes beyond the built-in ISO 639-1 and 639-2 sets. Only whitelisted codes are treated as languages, so release tags like `WEB`, `DDP` and `HDR` are not mistaken for one. |
 | `DUPLICATE_KEEP` | Which file survives when a rename target already exists and `DELETE_DUPLICATES` is on: `largest` (default) or `existing`. A rename keeps the subtitle's extension, so a collision is always between two files of the same format. |
@@ -187,8 +205,17 @@ deep; add each category as its own entry in `ROOT_DIRS`.
 Episodes are matched on an `SxxExx` token, so **absolute-numbered anime**
 (`Show - 001 - Title.mkv`) and **date-named daily shows** are skipped rather than
 renamed, and logged as `no SxxExx`. Multi-episode files claim every episode they
-span — `S01E01-E02`, `S01E01E02` and `S01E01-03` all expand — so a subtitle for
-the second episode isn't left looking orphaned.
+cover, so a subtitle for the second episode isn't left looking orphaned:
+
+| Name | Claims |
+|---|---|
+| `S01E01-E02`, `S01E01E02` | E01, E02 |
+| `S01E01-03` | E01, E02, E03 — a bare `-NN` is a range |
+| `S02E04-E14` | E04, E14 — an `E` before each number *lists* episodes |
+
+That last row matters for segmented shows: scene releases of Teen Titans Go! pair
+episodes that aren't adjacent. The trade-off is Sonarr's "Prefixed Range" style,
+where `S01E01-E03` means all three — it now claims E01 and E03 only.
 
 Scene releases that put subtitles in a `Subs/` subfolder are handled by the
 **film** script, which renames them onto the film and moves them up. The TV

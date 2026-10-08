@@ -260,6 +260,15 @@ EXTRA_VIDEO_SUFFIXES=(
 # deliberate versions. Set to "" to skip the report.
 DUPLICATES_REPORT="/mnt/user/appdata/subtitle_renamer/duplicates_film.txt"
 
+# Jellyfin's extras folders. Anything at or below a folder with one
+# of these names is a film's extras - making-ofs, trailers, scenes -
+# and is never listed in the duplicates report. Matched
+# case-insensitively against each folder below a root.
+EXTRAS_FOLDERS=(
+    "behind the scenes" "deleted scenes" interviews scenes samples
+    shorts featurettes clips other extras trailers
+)
+
 # --------------------- END CONFIGURATION --------------------
 
 SCRIPT_TITLE="Library Cleaner - Film"
@@ -298,6 +307,26 @@ while IFS=$'\t' read -r -d '' size video; do
     fi
 done < <(find "${FIND_OPTS[@]}" "${ROOTS[@]}" "${FIND_EXPR[@]}" -printf '%s\t%p\0')
 
+# True when $1 is, or sits inside, one of EXTRAS_FOLDERS. Only the
+# part of the path below its root is checked, so a root that happens
+# to be called "Other" doesn't count.
+in_extras_folder() {
+    local path="$1" r rel part x
+    for r in "${ROOTS[@]}"; do
+        case "$path" in "$r"/*) rel="${path#"$r"/}"; break ;; esac
+    done
+    [ -n "${rel:-}" ] || return 1
+    while [ -n "$rel" ]; do
+        part="${rel%%/*}"
+        for x in "${EXTRAS_FOLDERS[@]}"; do
+            [ "${part,,}" = "${x,,}" ] && return 0
+        done
+        [[ "$rel" == */* ]] || break
+        rel="${rel#*/}"
+    done
+    return 1
+}
+
 # ---------- PASS 2: process each folder exactly once --------
 folder_count=0
 dup_report_init "Film folders holding more than one feature-length video. Often an old copy beside the current one; sometimes deliberate versions."
@@ -312,7 +341,7 @@ for folder in "${!MAIN_VIDEO[@]}"; do
     declare -A vid_bases=()
     collect_video_bases "$folder"
     nfeatures="${#FEATURE_VIDEOS[@]}"
-    if [ "$nfeatures" -gt 1 ]; then
+    if [ "$nfeatures" -gt 1 ] && ! in_extras_folder "$folder"; then
         log "[MULTIPLE VIDEOS - $nfeatures feature-length] $folder"
         dup_report_group "$folder" "${FEATURE_VIDEOS[@]}"
     fi

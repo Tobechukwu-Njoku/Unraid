@@ -260,6 +260,15 @@ EXTRA_VIDEO_SUFFIXES=(
 # deliberate versions. Set to "" to skip the report.
 DUPLICATES_REPORT="/mnt/user/appdata/subtitle_renamer/duplicates_film.txt"
 
+# Jellyfin's extras folders. Anything at or below a folder with one
+# of these names is a film's extras - making-ofs, trailers, scenes -
+# and is never listed in the duplicates report. Matched
+# case-insensitively against each folder below a root.
+EXTRAS_FOLDERS=(
+    "behind the scenes" "deleted scenes" interviews scenes samples
+    shorts featurettes clips other extras trailers
+)
+
 # --------------------- END CONFIGURATION --------------------
 
 SCRIPT_TITLE="Library Cleaner - Film"
@@ -1219,6 +1228,7 @@ trash_prune_pass() {
 # Radarr / Sonarr. Rewritten on every run, dry runs included.
 DUP_GROUPS=0
 DUP_SPARE_BYTES=0
+DUP_FREEABLE_BYTES=0
 
 # Bytes as a short human-readable size, into HUMAN_SIZE.
 human_size() {
@@ -1239,7 +1249,9 @@ dup_report_init() {
     if ! {
         printf '# %s - %s\n' "$SCRIPT_TITLE" "$(date '+%Y-%m-%d %H:%M:%S')"
         printf '# %s\n' "$1"
-        printf '# Sizes are per file, largest first.\n\n'
+        printf '# Sizes are per file, largest first. Largest first is NOT advice to keep it -\n'
+        printf '# check which file Radarr / Sonarr actually tracks before deleting anything.\n'
+        printf '# A hardlink is the same data under a second name: deleting it frees nothing.\n\n'
     } > "$DUPLICATES_REPORT" 2>/dev/null; then
         log " WARNING: cannot write $DUPLICATES_REPORT - no duplicates report"
         DUPLICATES_REPORT=""
@@ -1247,41 +1259,71 @@ dup_report_init() {
 }
 
 # Add one group: a heading, then the videos in it.
+#
+# Two names for one file look exactly like a duplicate - same size,
+# same release - and deleting either frees nothing. So each file's
+# inode and link count are read too. Files are treated as the same
+# data only when inode, size AND a link count above one all agree:
+# on a user share two files on different disks can share an inode
+# number by coincidence.
 dup_report_group() {
-    local heading="$1" v s total=0 largest=0 lines=()
+    local heading="$1" v s ino links info sorted=() i j note
+    local -a size_of=() ino_of=() links_of=() name_of=()
     shift
     DUP_GROUPS=$((DUP_GROUPS + 1))
     for v in "$@"; do
-        s="$(file_size "$v")"
-        lines+=("$s"$'\t'"$v")
-        total=$((total + s))
-        [ "$s" -gt "$largest" ] && largest="$s"
+        info="$(stat -c '%s %i %h' -- "$v" 2>/dev/null)" \
+            || info="$(file_size "$v") 0 1"
+        read -r s ino links <<< "$info"
+        sorted+=("$s"$'\t'"$ino"$'\t'"$links"$'\t'"$v")
     done
-    DUP_SPARE_BYTES=$((DUP_SPARE_BYTES + total - largest))
-    [ -n "${DUPLICATES_REPORT:-}" ] || return 0
-    {
-        printf '%s\n' "$heading"
-        printf '%s\n' "${lines[@]}" | sort -t$'\t' -k1,1nr \
-            | while IFS=$'\t' read -r s v; do
-                human_size "$s"
-                printf '  %10s  %s\n' "$HUMAN_SIZE" "${v##*/}"
+    mapfile -t sorted < <(printf '%s\n' "${sorted[@]}" | sort -t$'\t' -k1,1nr)
+    for i in "${!sorted[@]}"; do
+        IFS=$'\t' read -r size_of[$i] ino_of[$i] links_of[$i] name_of[$i] <<< "${sorted[$i]}"
+    done
+
+    [ -n "${DUPLICATES_REPORT:-}" ] && printf '%s\n' "$heading" >> "$DUPLICATES_REPORT"
+    for i in "${!sorted[@]}"; do
+        note=""
+        if [ "$i" -gt 0 ]; then
+            DUP_SPARE_BYTES=$((DUP_SPARE_BYTES + size_of[i]))
+            for ((j = 0; j < i; j++)); do
+                if [ "${ino_of[i]}" != 0 ] && [ "${ino_of[i]}" = "${ino_of[j]}" ] \
+                   && [ "${size_of[i]}" = "${size_of[j]}" ] && [ "${links_of[i]}" -gt 1 ]; then
+                    note="same file as above (hardlink) - deleting it frees nothing"
+                    break
+                fi
             done
-        printf '\n'
-    } >> "$DUPLICATES_REPORT"
+            if [ -z "$note" ] && [ "${links_of[i]}" -gt 1 ]; then
+                note="also linked elsewhere (${links_of[i]} links) - deleting this name alone frees nothing"
+            fi
+            [ -z "$note" ] && DUP_FREEABLE_BYTES=$((DUP_FREEABLE_BYTES + size_of[i]))
+        fi
+        if [ -n "${DUPLICATES_REPORT:-}" ]; then
+            human_size "${size_of[i]}"
+            printf '  %10s  %s\n' "$HUMAN_SIZE" "${name_of[i]##*/}" >> "$DUPLICATES_REPORT"
+            [ -n "$note" ] && printf '  %10s    ^ %s\n' "" "$note" >> "$DUPLICATES_REPORT"
+        fi
+    done
+    [ -n "${DUPLICATES_REPORT:-}" ] && printf '\n' >> "$DUPLICATES_REPORT"
+    return 0
 }
 
 # Close the report with a total, and point the log at it.
 dup_report_finish() {
     [ -n "${DUPLICATES_REPORT:-}" ] || return 0
-    human_size "$DUP_SPARE_BYTES"
+    local spare freeable noun="groups"
     if [ "$DUP_GROUPS" -eq 0 ]; then
         printf 'None found.\n' >> "$DUPLICATES_REPORT"
-    else
-        local noun="groups"
-        [ "$DUP_GROUPS" -eq 1 ] && noun="group"
-        printf '# %d %s. Files other than the largest in each total %s.\n' \
-            "$DUP_GROUPS" "$noun" "$HUMAN_SIZE" >> "$DUPLICATES_REPORT"
+        return 0
     fi
+    [ "$DUP_GROUPS" -eq 1 ] && noun="group"
+    human_size "$DUP_SPARE_BYTES";    spare="$HUMAN_SIZE"
+    human_size "$DUP_FREEABLE_BYTES"; freeable="$HUMAN_SIZE"
+    {
+        printf '# %d %s. Files other than the largest in each total %s.\n' "$DUP_GROUPS" "$noun" "$spare"
+        printf '# Of that, %s is in files with no other link - space deleting them would free.\n' "$freeable"
+    } >> "$DUPLICATES_REPORT"
 }
 
 # Log one "label value" summary line, phrased for dry-run or not.
@@ -1411,6 +1453,26 @@ while IFS=$'\t' read -r -d '' size video; do
     fi
 done < <(find "${FIND_OPTS[@]}" "${ROOTS[@]}" "${FIND_EXPR[@]}" -printf '%s\t%p\0')
 
+# True when $1 is, or sits inside, one of EXTRAS_FOLDERS. Only the
+# part of the path below its root is checked, so a root that happens
+# to be called "Other" doesn't count.
+in_extras_folder() {
+    local path="$1" r rel part x
+    for r in "${ROOTS[@]}"; do
+        case "$path" in "$r"/*) rel="${path#"$r"/}"; break ;; esac
+    done
+    [ -n "${rel:-}" ] || return 1
+    while [ -n "$rel" ]; do
+        part="${rel%%/*}"
+        for x in "${EXTRAS_FOLDERS[@]}"; do
+            [ "${part,,}" = "${x,,}" ] && return 0
+        done
+        [[ "$rel" == */* ]] || break
+        rel="${rel#*/}"
+    done
+    return 1
+}
+
 # ---------- PASS 2: process each folder exactly once --------
 folder_count=0
 dup_report_init "Film folders holding more than one feature-length video. Often an old copy beside the current one; sometimes deliberate versions."
@@ -1425,7 +1487,7 @@ for folder in "${!MAIN_VIDEO[@]}"; do
     declare -A vid_bases=()
     collect_video_bases "$folder"
     nfeatures="${#FEATURE_VIDEOS[@]}"
-    if [ "$nfeatures" -gt 1 ]; then
+    if [ "$nfeatures" -gt 1 ] && ! in_extras_folder "$folder"; then
         log "[MULTIPLE VIDEOS - $nfeatures feature-length] $folder"
         dup_report_group "$folder" "${FEATURE_VIDEOS[@]}"
     fi

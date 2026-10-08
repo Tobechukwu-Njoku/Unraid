@@ -1172,6 +1172,7 @@ trash_prune_pass() {
 # Radarr / Sonarr. Rewritten on every run, dry runs included.
 DUP_GROUPS=0
 DUP_SPARE_BYTES=0
+DUP_FREEABLE_BYTES=0
 
 # Bytes as a short human-readable size, into HUMAN_SIZE.
 human_size() {
@@ -1192,7 +1193,9 @@ dup_report_init() {
     if ! {
         printf '# %s - %s\n' "$SCRIPT_TITLE" "$(date '+%Y-%m-%d %H:%M:%S')"
         printf '# %s\n' "$1"
-        printf '# Sizes are per file, largest first.\n\n'
+        printf '# Sizes are per file, largest first. Largest first is NOT advice to keep it -\n'
+        printf '# check which file Radarr / Sonarr actually tracks before deleting anything.\n'
+        printf '# A hardlink is the same data under a second name: deleting it frees nothing.\n\n'
     } > "$DUPLICATES_REPORT" 2>/dev/null; then
         log " WARNING: cannot write $DUPLICATES_REPORT - no duplicates report"
         DUPLICATES_REPORT=""
@@ -1200,41 +1203,71 @@ dup_report_init() {
 }
 
 # Add one group: a heading, then the videos in it.
+#
+# Two names for one file look exactly like a duplicate - same size,
+# same release - and deleting either frees nothing. So each file's
+# inode and link count are read too. Files are treated as the same
+# data only when inode, size AND a link count above one all agree:
+# on a user share two files on different disks can share an inode
+# number by coincidence.
 dup_report_group() {
-    local heading="$1" v s total=0 largest=0 lines=()
+    local heading="$1" v s ino links info sorted=() i j note
+    local -a size_of=() ino_of=() links_of=() name_of=()
     shift
     DUP_GROUPS=$((DUP_GROUPS + 1))
     for v in "$@"; do
-        s="$(file_size "$v")"
-        lines+=("$s"$'\t'"$v")
-        total=$((total + s))
-        [ "$s" -gt "$largest" ] && largest="$s"
+        info="$(stat -c '%s %i %h' -- "$v" 2>/dev/null)" \
+            || info="$(file_size "$v") 0 1"
+        read -r s ino links <<< "$info"
+        sorted+=("$s"$'\t'"$ino"$'\t'"$links"$'\t'"$v")
     done
-    DUP_SPARE_BYTES=$((DUP_SPARE_BYTES + total - largest))
-    [ -n "${DUPLICATES_REPORT:-}" ] || return 0
-    {
-        printf '%s\n' "$heading"
-        printf '%s\n' "${lines[@]}" | sort -t$'\t' -k1,1nr \
-            | while IFS=$'\t' read -r s v; do
-                human_size "$s"
-                printf '  %10s  %s\n' "$HUMAN_SIZE" "${v##*/}"
+    mapfile -t sorted < <(printf '%s\n' "${sorted[@]}" | sort -t$'\t' -k1,1nr)
+    for i in "${!sorted[@]}"; do
+        IFS=$'\t' read -r size_of[$i] ino_of[$i] links_of[$i] name_of[$i] <<< "${sorted[$i]}"
+    done
+
+    [ -n "${DUPLICATES_REPORT:-}" ] && printf '%s\n' "$heading" >> "$DUPLICATES_REPORT"
+    for i in "${!sorted[@]}"; do
+        note=""
+        if [ "$i" -gt 0 ]; then
+            DUP_SPARE_BYTES=$((DUP_SPARE_BYTES + size_of[i]))
+            for ((j = 0; j < i; j++)); do
+                if [ "${ino_of[i]}" != 0 ] && [ "${ino_of[i]}" = "${ino_of[j]}" ] \
+                   && [ "${size_of[i]}" = "${size_of[j]}" ] && [ "${links_of[i]}" -gt 1 ]; then
+                    note="same file as above (hardlink) - deleting it frees nothing"
+                    break
+                fi
             done
-        printf '\n'
-    } >> "$DUPLICATES_REPORT"
+            if [ -z "$note" ] && [ "${links_of[i]}" -gt 1 ]; then
+                note="also linked elsewhere (${links_of[i]} links) - deleting this name alone frees nothing"
+            fi
+            [ -z "$note" ] && DUP_FREEABLE_BYTES=$((DUP_FREEABLE_BYTES + size_of[i]))
+        fi
+        if [ -n "${DUPLICATES_REPORT:-}" ]; then
+            human_size "${size_of[i]}"
+            printf '  %10s  %s\n' "$HUMAN_SIZE" "${name_of[i]##*/}" >> "$DUPLICATES_REPORT"
+            [ -n "$note" ] && printf '  %10s    ^ %s\n' "" "$note" >> "$DUPLICATES_REPORT"
+        fi
+    done
+    [ -n "${DUPLICATES_REPORT:-}" ] && printf '\n' >> "$DUPLICATES_REPORT"
+    return 0
 }
 
 # Close the report with a total, and point the log at it.
 dup_report_finish() {
     [ -n "${DUPLICATES_REPORT:-}" ] || return 0
-    human_size "$DUP_SPARE_BYTES"
+    local spare freeable noun="groups"
     if [ "$DUP_GROUPS" -eq 0 ]; then
         printf 'None found.\n' >> "$DUPLICATES_REPORT"
-    else
-        local noun="groups"
-        [ "$DUP_GROUPS" -eq 1 ] && noun="group"
-        printf '# %d %s. Files other than the largest in each total %s.\n' \
-            "$DUP_GROUPS" "$noun" "$HUMAN_SIZE" >> "$DUPLICATES_REPORT"
+        return 0
     fi
+    [ "$DUP_GROUPS" -eq 1 ] && noun="group"
+    human_size "$DUP_SPARE_BYTES";    spare="$HUMAN_SIZE"
+    human_size "$DUP_FREEABLE_BYTES"; freeable="$HUMAN_SIZE"
+    {
+        printf '# %d %s. Files other than the largest in each total %s.\n' "$DUP_GROUPS" "$noun" "$spare"
+        printf '# Of that, %s is in files with no other link - space deleting them would free.\n' "$freeable"
+    } >> "$DUPLICATES_REPORT"
 }
 
 # Log one "label value" summary line, phrased for dry-run or not.
@@ -1343,10 +1376,18 @@ ep_ambig=0
 # by only its first token left the others unclaimed - their
 # subtitles looked orphaned and were deleted.
 #
-#   Show - S01E01 - Title      -> S01E01
-#   Show - S01E01-E02 - Double -> S01E01 S01E02
-#   Show - S01E01E02 - Double  -> S01E01 S01E02
-#   Show - S01E01-03 - Triple  -> S01E01 S01E02 S01E03
+#   Show - S01E01 - Title           -> S01E01
+#   Show - S01E01-E02 - Double      -> S01E01 S01E02
+#   Show - S01E01E02 - Double       -> S01E01 S01E02
+#   Show - S01E01-03 - Triple       -> S01E01 S01E02 S01E03
+#   Show.S02E04-E14.Segments.mkv    -> S02E04 S02E14
+#
+# A written "E" before each number lists episodes; it does not span
+# them. Scene releases of segmented shows pair episodes that aren't
+# adjacent, and filling the gap made one Teen Titans Go! file claim
+# eleven episodes and invent dozens of duplicates. Only the bare
+# "-NN" form is a range. The cost: Sonarr's "Prefixed Range" style,
+# S01E01-E03, now claims 1 and 3 but not 2.
 extract_ep_tokens() {
     local name="$1" season first width tail matched n i tok
     EP_TOKENS=()
@@ -1372,10 +1413,15 @@ extract_ep_tokens() {
         fi
         [ "$n" -gt "$first" ] || break
         [ $((n - first)) -le 50 ] || break
-        for ((i = first + 1; i <= n; i++)); do
-            printf -v tok 'S%02dE%02d' "$season" "$i"
+        if [ "${BASH_REMATCH[1]}" = "-" ]; then
+            for ((i = first + 1; i <= n; i++)); do
+                printf -v tok 'S%02dE%02d' "$season" "$i"
+                EP_TOKENS+=("$tok")
+            done
+        else
+            printf -v tok 'S%02dE%02d' "$season" "$n"
             EP_TOKENS+=("$tok")
-        done
+        fi
         first="$n"
         tail="${tail#"$matched"}"
     done
