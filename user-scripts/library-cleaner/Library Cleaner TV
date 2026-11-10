@@ -59,7 +59,7 @@ DRY_RUN="true"
 ENABLE_LOG="true"
 
 # Log file - ignored when ENABLE_LOG="false".
-LOG_FILE="/mnt/user/appdata/subtitle_renamer/rename_tv.log"
+LOG_FILE="/mnt/user/OS-AppData/subtitle_renamer/rename_tv.log"
 
 VIDEO_EXTS=(mkv mp4 avi m4v mov mpg mpeg wmv flv webm ts m2ts)
 SUB_EXTS=(srt sub ass ssa vtt idx sup)
@@ -184,7 +184,7 @@ DUPLICATE_KEEP="largest"
 # Must NOT sit inside any of ROOT_DIRS: the junk and empty-folder
 # passes would walk back into it and undo the safety net. The
 # script refuses to run if it does.
-TRASH_DIR="/mnt/user/appdata/library_cleaner/trash"
+TRASH_DIR="/mnt/user/OS-AppData/library_cleaner/trash"
 
 # When "true", find follows symbolic links, so a symlinked root
 # or subfolder is walked instead of silently yielding nothing.
@@ -211,7 +211,7 @@ TRASH_KEEP_DAYS="30"
 # first, rewritten on every run (dry runs included). Their subtitles
 # and trickplay are left alone, since there's no telling which copy
 # they belong to. Set to "" to skip the report.
-DUPLICATES_REPORT="/mnt/user/appdata/subtitle_renamer/duplicates_tv.txt"
+DUPLICATES_REPORT="/mnt/user/OS-AppData/subtitle_renamer/duplicates_tv.txt"
 
 # --------------------- END CONFIGURATION --------------------
 

@@ -37,7 +37,7 @@ ENABLE_LOG="true"
 # structure under a timestamped folder. Set to "" to delete
 # outright, which is faster: it uses a single find -delete with no
 # per-file work. Must not sit inside any of ROOT_DIRS.
-TRASH_DIR="/mnt/user/appdata/library_cleaner/trash"
+TRASH_DIR="/mnt/user/OS-AppData/library_cleaner/trash"
 
 # How long to keep quarantined files. Run folders under TRASH_DIR
 # older than this many days are removed at the end of a run. Set to
