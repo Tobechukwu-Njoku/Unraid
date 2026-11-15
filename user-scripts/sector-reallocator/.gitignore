@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+ddrescue_*.map*
+journal_*.jsonl
+*.log

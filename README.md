@@ -8,12 +8,13 @@ each with its own README.
 ### User Scripts
 
 For the [User Scripts](https://forums.unraid.net/topic/48286-plugin-ca-user-scripts/)
-plugin. Each script is self-contained, so it can be pasted straight into the
-User Scripts editor.
+plugin. Most scripts are self-contained and can be pasted straight into the
+User Scripts editor. Projects with companion files document their installation.
 
 | Project | What it does |
 | --- | --- |
 | [library-cleaner](user-scripts/library-cleaner) | Renames subtitles and `.trickplay` folders to match their Radarr/Sonarr videos, with optional cleanup of orphan, duplicate and outlier subs, stale `.nfo` files and junk. Tested in CI. |
+| [sector-reallocator](user-scripts/sector-reallocator) | Manual discovery and targeted destructive sector writes on unused, unassigned SATA HDDs, with a guarded launcher, durable recovery journals and offline tests. |
 | [atomic-read-cache](user-scripts/atomic-read-cache) | Moves small files from an array-backed share onto a cache pool, with a size-threshold report and a dry-run mode. |
 | [jellyfin-clean-trickplay-folders](user-scripts/jellyfin-clean-trickplay-folders) | Checks every film folder has one video and a matching `.trickplay` folder, and removes orphaned trickplay folders. |
 | [jellyfin-clean-empty-folders](user-scripts/jellyfin-clean-empty-folders) | Reports film folders that contain no video file. |
