@@ -127,6 +127,50 @@ class LauncherTests(unittest.TestCase):
             (definitions / 'vm.xml').write_text(f'<domain><devices><disk><source {attribute}="/dev/MOCK"/></disk></devices></domain>')
             with self.assertRaises(launcher.GateError):launcher.check_virtual_machines(Path('/dev/MOCK'), proc, definitions)
 
+    def test_stopped_vm_partition_and_by_id_alias_are_rejected(self):
+        proc = self.root / 'proc';proc.mkdir()
+        definitions = self.root / 'qemu';definitions.mkdir()
+        disk = self.root / 'sdb';partition = self.root / 'sdb1'
+        disk.touch();partition.touch()
+        alias = self.root / 'ata-TEST-part1';alias.symlink_to(partition)
+        for device in (partition, alias):
+            (definitions / 'vm.xml').write_text(
+                f'<domain><devices><disk><source dev="{device}"/></disk></devices></domain>')
+            with self.assertRaises(launcher.GateError):
+                launcher.check_virtual_machines(disk, proc, definitions)
+
+    def test_partition_check_does_not_confuse_other_disk_names(self):
+        self.assertFalse(launcher.device_matches_target_or_partition(self.root / 'sdba1', self.root / 'sdb'))
+        self.assertTrue(launcher.device_matches_target_or_partition(self.root / 'nvme0n1p1', self.root / 'nvme0n1'))
+
+    def test_wrapper_fsyncs_evidence_parent(self):
+        engine = launcher.load_engine()
+        launcher.install_guards(engine, types.SimpleNamespace(check=lambda *a: None))
+        synced = [];original_fsync = os.fsync
+        def record(fd):
+            st = os.fstat(fd);synced.append((st.st_dev, st.st_ino));original_fsync(fd)
+        with patch.object(launcher.os, 'fsync', side_effect=record):
+            fd = engine.prepare_private_evidence_dir(self.evidence, min_free_bytes=0)
+        try:
+            st = self.mount.stat()
+            self.assertIn((st.st_dev, st.st_ino), synced)
+        finally:os.close(fd)
+
+    def test_wrapper_stops_if_parent_sync_fails(self):
+        engine = launcher.load_engine()
+        launcher.install_guards(engine, types.SimpleNamespace(check=lambda *a: None))
+        parent = self.mount.stat();original_fsync = os.fsync;child_descriptors = []
+        def fail_parent(fd):
+            st = os.fstat(fd)
+            if (st.st_dev, st.st_ino) == (parent.st_dev, parent.st_ino):
+                raise OSError('mock parent fsync failure')
+            child_descriptors.append(fd);original_fsync(fd)
+        with patch.object(launcher.os, 'fsync', side_effect=fail_parent):
+            with self.assertRaisesRegex(engine.ReallocatorError, 'persist evidence'):
+                engine.prepare_private_evidence_dir(self.evidence, min_free_bytes=0)
+        self.assertTrue(child_descriptors)
+        with self.assertRaises(OSError):os.fstat(child_descriptors[-1])
+
     def test_default_is_discovery(self):
         args = launcher.build_arguments(self.arguments())
         self.assertIn('--dry-run', args);self.assertNotIn('--execute', args)
@@ -151,7 +195,7 @@ class LauncherTests(unittest.TestCase):
     def test_changed_assignment_blocks_engine_boundaries(self):
         calls = []
         def original(*args, **kwargs):calls.append('called');return None
-        engine = types.SimpleNamespace(ReallocatorError=RuntimeError, inspect_sata_drive=original,
+        engine = types.SimpleNamespace(ReallocatorError=RuntimeError, prepare_private_evidence_dir=original, inspect_sata_drive=original,
                   assert_device_identity_and_capacity=original, apply_recovery_settings=original,
                   run_ddrescue_and_parse=original, verify_cleanup_target_identity=original)
         def refuse(*args):raise launcher.GateError('mock assignment change')

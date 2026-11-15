@@ -86,6 +86,14 @@ def check_evidence_mount(mount, evidence, mountinfo=Path('/proc/self/mountinfo')
         raise GateError('Evidence filesystem must be mounted read/write.')
 
 
+def device_matches_target_or_partition(candidate, target):
+    resolved, target = Path(candidate).resolve(), Path(target).resolve()
+    if resolved == target:
+        return True
+    return (resolved.parent == target.parent and
+            re.fullmatch(re.escape(target.name) + r'(?:p)?[0-9]+', resolved.name) is not None)
+
+
 def check_assignments(disks, target, serial):
     if not disks or 'flash' not in disks:
         raise GateError('Unraid disk assignments are incomplete: boot-device entry is missing.')
@@ -94,10 +102,7 @@ def check_assignments(disks, target, serial):
         device, disk_id = values.get('device', ''), values.get('id', '')
         if device:
             candidate = Path(device) if device.startswith('/') else Path('/dev') / device
-            resolved = candidate.resolve()
-            partition_of_target = (resolved.parent == target.parent and
-                                   re.fullmatch(re.escape(target.name) + r'(?:p)?[0-9]+', resolved.name))
-            if resolved == target or partition_of_target:
+            if device_matches_target_or_partition(candidate, target):
                 raise GateError(f'Target is assigned to Unraid slot {name!r}.')
         if serial and disk_id and serial.casefold() in disk_id.casefold():
             raise GateError(f'Target serial appears in Unraid assignment {name!r}.')
@@ -122,7 +127,7 @@ def check_virtual_machines(target, proc=Path('/proc'), definitions=Path('/etc/li
                 root = ET.parse(xml).getroot()
                 for source in root.findall('./devices/disk/source'):
                     device = source.get('dev') or source.get('file')
-                    if device and Path(device).resolve() == target:
+                    if device and device_matches_target_or_partition(device, target):
                         raise GateError('Target is referenced by a virtual machine disk definition.')
     except (OSError, ET.ParseError) as exc:
         raise GateError(f'Cannot establish virtual-machine exclusion: {exc}') from exc
@@ -186,6 +191,31 @@ def install_guards(engine, guard):
                 raise engine.ReallocatorError(str(exc)) from exc
             return original(*args, **kwargs)
         setattr(engine, name, wrapped)
+
+    # The raw engine fsyncs the new directory itself. Persist its parent entry too.
+    original_prepare = engine.prepare_private_evidence_dir
+    def prepare_evidence(*args, **kwargs):
+        evidence = Path(args[0] if args else kwargs['evidence_dir'])
+        fd = original_prepare(*args, **kwargs)
+        parent_fd = None
+        try:
+            parent_fd = engine._open_parent_dir_fd(evidence)
+            current = os.stat(evidence.name, dir_fd=parent_fd, follow_symlinks=False)
+            opened = os.fstat(fd)
+            if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+                raise engine.ReallocatorError('Evidence directory changed before its parent could be synchronized.')
+            os.fsync(parent_fd)
+            return fd
+        except OSError as exc:
+            os.close(fd)
+            raise engine.ReallocatorError(f'Cannot persist evidence directory in its parent: {exc}') from exc
+        except BaseException:
+            os.close(fd)
+            raise
+        finally:
+            if parent_fd is not None:
+                os.close(parent_fd)
+    engine.prepare_private_evidence_dir = prepare_evidence
 
     original_inspect = engine.inspect_sata_drive
     def inspect(*args, **kwargs):

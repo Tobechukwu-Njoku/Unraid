@@ -14,13 +14,18 @@ formats are outside this engine's scope.
 This is a manual maintenance tool, not a scheduled repair service. No real
 hardware or Unraid installation has been qualified by this repository's tests.
 
+**Qualification blocker:** V8 still refuses recovery if an interrupted/failed
+append leaves partial JSON in its journal. The offline suite reproduces this
+limitation; passing tests do not establish recovery from torn records. Keep this
+package under review until that journal-recovery design is resolved.
+
 ## Files
 
 | File | Purpose |
 | --- | --- |
 | `sector_reallocator.sh` | Paste into User Scripts; edit its configuration block. |
 | `unraid_launcher.py` | Unraid preflight, process lock, and repeated checks at engine boundaries. |
-| `sata_reallocator.py` | Reviewed V7 maintenance engine, preserved unchanged. |
+| `sata_reallocator.py` | Reviewed V8 maintenance engine, preserved unchanged. |
 | `engine-manifest.json` | Version and SHA-256 used to check the installed engine before loading it. |
 | `tests/` | Offline engine scenarios and launcher tests. |
 
@@ -58,7 +63,9 @@ manifest installed together. It does not download packages or code while running
    files mode `0600`. The engine can create its final directory under an existing
    parent. It refuses insecure existing permissions instead of changing them.
 
-Keep this same evidence directory for subsequent runs and recovery. Do not delete
+Keep the same evidence directory and scan limit for resumption/recovery of that
+scan scope. A different scan limit requires a new directory after the earlier
+run has closed successfully or been recovered. Retain its evidence. Do not delete
 or edit maps/journals to bypass a failed preflight. The evidence files contain
 text and defect locations, not recovered media data. Discovery writes these
 files, although it does not issue sector writes to the target.
@@ -90,8 +97,12 @@ CONFIRM_SERIAL=""
 Those paths are placeholders. Mount the real evidence filesystem and create any
 missing parent directories first. Keep the User Scripts schedule **Disabled**;
 launch manually. Begin with `MAX_SCAN_GB="1"` to qualify a bounded discovery run.
-Review its output and journals before removing the limit for a full scan. A
-limited/resumed scan is not a fresh certification of the entire drive.
+Review its output and journals, then close or recover that qualification run.
+For a full scan, remove the limit **and select a different evidence directory**,
+while retaining the bounded-run evidence. The map metadata binds `scan_limit_bytes`;
+reusing the 1 GiB directory with a larger limit is rejected, including with resume
+enabled. Do not select a new directory to bypass an unresolved earlier run.
+A limited/resumed scan is not a fresh certification of the entire drive.
 
 For destructive work, set `MODE="execute"` and set `CONFIRM_SERIAL` to the exact
 configured serial. The engine also checks the live drive serial. If signatures
@@ -141,7 +152,9 @@ QEMU process names, and accessible VM disk definitions. It verifies target
 major/minor/path identity and the expected live serial. It rechecks host state
 before drive-setting changes, the scan, target checks and cleanup gates. Only one
 launcher instance can run at a time; the engine also holds its own journal and
-exclusive-device claims.
+exclusive-device claims. The wrapper additionally synchronizes the evidence
+directory's parent before returning control to the engine; this persists a newly
+created directory entry and refuses operation if that synchronization fails.
 
 These checks do not lock Unraid's GUI, libvirt, preclear or other root processes.
 They cannot identify every third-party passthrough configuration or prevent a
@@ -152,11 +165,22 @@ No services, assignments, mounts or installed packages are changed by the launch
 The raw engine is also present for inspection, but invoking it directly bypasses
 the Unraid wrapper. Use `unraid_launcher.py` on Unraid.
 
-One known minor V7 reporting issue remains: after unsuccessful write-error
-corroboration, the returned final status may be more specific than the durable
-attempt status. Both are failures, so the engine still stops; the final
-corroboration detail may be missing from the journal. Neither a successful VERIFY
-nor zero readback proves physical spare-sector relocation.
+V8 preserves each immediate attempt outcome and appends a correlated
+`RETRY_CORROBORATION_FAILED` record for a failed retry corroboration. Replay and
+the returned final status now agree; orphan or mismatched corroboration records
+are rejected.
+
+Partial-record handling remains unresolved. After a failed append, later error
+or closure appends may concatenate with a JSON prefix, turning a torn tail into
+middle-of-file corruption. Both normal startup and explicit recovery refuse the
+result before restoring settings. Do not remove records to bypass this refusal;
+a supported, evidence-preserving tail-recovery and poisoned-writer design is
+still needed. The raw engine also lacks parent-directory synchronization when
+creating evidence; the Unraid wrapper mitigates that separately. Invoking the
+engine directly bypasses that mitigation.
+
+Neither a successful VERIFY nor zero readback proves physical spare-sector
+relocation.
 
 The Unraid state conventions used here are visible in the upstream
 [webGUI helpers](https://github.com/unraid/webgui/blob/master/emhttp/plugins/dynamix/include/Helpers.php)
@@ -171,8 +195,10 @@ On a Linux development host with Python 3.9+ and Bash:
 ./user-scripts/sector-reallocator/tests/run_tests.sh
 ```
 
-The suite compiles the Python, checks Bash syntax, executes 43 engine scenarios,
-and tests the launcher. Drive I/O, sysfs, host assignments and drive commands are
+The suite compiles the Python, checks Bash syntax, executes 58 engine scenarios,
+and runs 29 launcher tests. Some engine scenarios reproduce the documented
+durability limitations rather than assert successful recovery. Drive I/O, sysfs,
+host assignments and drive commands are
 mocked. Temporary real files contain only text journals/maps. The recovery checks
 include all ten durable-record boundaries in a mixed settings/target recovery.
 They do not test torn records, actual hardware or an installed Unraid system.

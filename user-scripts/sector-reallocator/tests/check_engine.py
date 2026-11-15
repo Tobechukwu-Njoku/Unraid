@@ -4,7 +4,7 @@ Only temporary text evidence files are created. The supplied main is never invok
 import ast, dataclasses, errno, hashlib, io, json, os, pathlib, subprocess, tempfile, types
 SOURCE=pathlib.Path(__file__).resolve().parent.parent/'sata_reallocator.py'
 code=SOURCE.read_text()
-compiled=compile(ast.parse(code),'attached-v7','exec')
+compiled=compile(ast.parse(code),'attached-v8','exec')
 def namespace():
  ns={'__name__':'review_only'};exec(compiled,ns);return ns
 def drive(ns,**changes):
@@ -54,7 +54,7 @@ for label,result in [('short_write',128),('non_EIO_error',None)]:
  r=ns['overwrite_and_verify_physical_sector'](0,drive(ns),0,8192,io.BytesIO(bytes(512)),io.BytesIO(bytes(512)),journal=MemoryJournal())
  assert [e['event_type'] for e in events]==['WRITE_INTENT','ATTEMPT_OUTCOME']
  add('writer '+label,{'status':r['status'],'events':events})
-with tempfile.TemporaryDirectory(prefix='reallocator-v7-text-review-') as tmp:
+with tempfile.TemporaryDirectory(prefix='reallocator-v8-text-review-') as tmp:
  root=pathlib.Path(tmp);os.chmod(root,0o700)
  ns=namespace();shared=root/'shared';shared.mkdir(mode=0o777);os.chmod(shared,0o777)
  try:ns['prepare_private_evidence_dir'](shared,min_free_bytes=0);raise AssertionError('accepted')
@@ -161,7 +161,7 @@ with tempfile.TemporaryDirectory(prefix='reallocator-v7-text-review-') as tmp:
   assert len(attempts)==2;add('metadata-only interrupted scan restart',{'stage_a_attempts':len(attempts),'map_exists':mp.exists()})
  finally:os.close(df)
 # Recovery must itself be restartable after every durable record.
-with tempfile.TemporaryDirectory(prefix='reallocator-v7-recovery-check-') as tmp:
+with tempfile.TemporaryDirectory(prefix='reallocator-v8-recovery-check-') as tmp:
  root=pathlib.Path(tmp);os.chmod(root,0o700)
  for prior_restoration_error in [False,True]:
   ns=namespace();d=drive(ns,orig_kernel_timeout='60',orig_sct_erc=None);j,df=journal(ns,root,d,'recovery-crash-'+str(prior_restoration_error));settings={'timeout':'60','writes':[]}
@@ -210,7 +210,7 @@ for fail in [False,True]:
   after=os.umask(0o022);os.umask(after);assert after==0o022 and observed=={'child_umask':0o077,'parent_mask_during_call':0o077}
   add('run_cmd umask fail='+str(fail),{**observed,'parent_mask_after_call':after})
  finally:os.umask(old_mask)
-with tempfile.TemporaryDirectory(prefix='reallocator-v7-extra-text-') as tmp:
+with tempfile.TemporaryDirectory(prefix='reallocator-v8-extra-text-') as tmp:
  root=pathlib.Path(tmp);os.chmod(root,0o700)
  ns=namespace();d=drive(ns);j,df=journal(ns,root,d,'confirmation-readable');reads=[]
  try:
@@ -250,7 +250,7 @@ with tempfile.TemporaryDirectory(prefix='reallocator-v7-extra-text-') as tmp:
   finally:j.close();os.close(df)
 # Replay every durable recovery prefix with timeout + ERC + three target obligation types.
 # The saved prefixes are ordinary text journal fixtures, never media copies.
-with tempfile.TemporaryDirectory(prefix='reallocator-v7-prefix-text-') as tmp:
+with tempfile.TemporaryDirectory(prefix='reallocator-v8-prefix-text-') as tmp:
  root=pathlib.Path(tmp);os.chmod(root,0o700)
  def wire_recovery(ns,settings):
   class SysfsTimeout:
@@ -316,7 +316,7 @@ with tempfile.TemporaryDirectory(prefix='reallocator-v7-prefix-text-') as tmp:
    add('Phase B '+issue,{'error':error,'restoration_writes':settings['writes']})
   finally:j.close();os.close(df)
 
-# Existing low-severity discrepancy: corroboration changes return status after outcome commit.
+# Corroboration preserves the immediate outcome and durably records the final classification.
 ns=namespace();d=drive(ns);events=[]
 class MemoryOutcomeJournal:
  run_id='OUTCOME_TEST'
@@ -328,6 +328,84 @@ r=ns['overwrite_and_verify_physical_sector'](0,d,0,8192,io.BytesIO(bytes(512)),i
 recorded=next(e['status'] for e in events if e['event_type']=='ATTEMPT_OUTCOME')
 assert recorded=='WRITE_EIO_FAILED' and r['status'].startswith('EIO_OR_DEFECT_UNCORROBORATED_INDETERMINATE')
 assert recorded not in ns['RESOLVED_TARGET_STATUSES'] and r['status'] not in ns['RESOLVED_TARGET_STATUSES']
-add('returned outcome differs from durable outcome after failed corroboration',{'journal_status':recorded,'returned_status':r['status'],'both_unresolved':True})
+corroboration=next(e for e in events if e['event_type']=='RETRY_CORROBORATION_FAILED')
+assert corroboration['status']==r['status'] and corroboration['prior_attempt_status']==recorded
+add('corroboration classification recorded separately from immediate attempt',{'attempt_status':recorded,'corroboration_status':corroboration['status'],'returned_status':r['status'],'both_unresolved':True})
+
+# Validate the new event against real journal replay, including operation mismatches.
+with tempfile.TemporaryDirectory(prefix='reallocator-v8-corroboration-text-') as tmp:
+ root=pathlib.Path(tmp);os.chmod(root,0o700);ns=namespace();d=drive(ns);j,df=journal(ns,root,d,'corroboration');events=[]
+ try:
+  proxy=types.SimpleNamespace(**vars(os))
+  def eio(*a):raise OSError(errno.EIO,'mock write failure')
+  proxy.pwritev=eio;ns['os']=proxy
+  ns['run_ata_media_verify']=lambda *a:ns['VerifyResult']('INDETERMINATE',33,None,None,None,'mock timeout')
+  j.append('RUN_START',{'mode':'EXECUTE'})
+  result=ns['overwrite_and_verify_physical_sector'](0,d,0,8192,io.BytesIO(bytes(512)),io.BytesIO(bytes(512)),journal=j)
+  raw=ns['read_all_bytes_from_fd'](j.fd);records=[json.loads(line) for line in raw.splitlines()]
+  replay=ns['replay_journal_state'](raw,d,j.path)
+  assert replay.unresolved_outcomes[0]['status']==result['status']
+  assert replay.unresolved_outcomes[0]['corroboration_detail']=='mock timeout'
+  assert replay.unresolved_outcomes[0]['prior_attempt_status']=='WRITE_EIO_FAILED'
+  assert not replay.pending_intents
+  add('V8 durable corroboration matches returned status',{'returned_status':result['status'],'replayed_outcome':replay.unresolved_outcomes[0]})
+  event=records[-1];assert event['event_type']=='RETRY_CORROBORATION_FAILED'
+  for field,value in [('run_id','OTHER'),('attempt',99),('operation','OTHER'),('op_id','OTHER'),('offset_bytes',512),('status',''),('status','VERIFIED_LOGICAL_READBACK_AND_MEDIA_VERIFY'),('status','DEGRADED_LOGICAL_READBACK_ONLY_NO_MEDIA_VERIFY')]:
+   altered=[*records[:-1],{**event,field:value}]
+   try:ns['replay_journal_state'](('\n'.join(json.dumps(r) for r in altered)+'\n').encode(),d,j.path);raise AssertionError('bad corroboration accepted')
+   except ns['ReallocatorError'] as exc:add('corroboration rejects '+field+'='+str(value),str(exc))
+  try:ns['replay_journal_state']((json.dumps(event)+'\n').encode(),d,j.path);raise AssertionError('orphan accepted')
+  except ns['ReallocatorError'] as exc:add('orphan corroboration rejected',str(exc))
+  # A crash before the extra record retains an unresolved immediate outcome.
+  before=('\n'.join(json.dumps(r) for r in records[:-1])+'\n').encode()
+  pre=ns['replay_journal_state'](before,d,j.path);assert pre.unresolved_outcomes[0]['status']=='WRITE_EIO_FAILED'
+  add('interruption before corroboration remains unresolved',{'status':pre.unresolved_outcomes[0]['status']})
+  j.run_id='RECOVERY';ns['assert_device_identity_and_capacity']=lambda *a:None
+  ns['confirm_live_defect']=lambda *a:('READABLE','mock readable')
+  ns['reconcile_interrupted_journal_state'](d,0,j);j.append('RUN_CLOSURE',{'exit_code':0});j.reconcile_prior_records()
+  add('corroborated failure recovery then ordinary startup','ACCEPTED')
+ finally:j.close();os.close(df)
+# Inspect directory sync targets. This traces syscalls, not physical crash behavior.
+with tempfile.TemporaryDirectory(prefix='reallocator-v8-directory-text-') as tmp:
+ root=pathlib.Path(tmp);os.chmod(root,0o700);ns=namespace();synced=[]
+ proxy=types.SimpleNamespace(**vars(os))
+ def fsync_spy(fd):
+  st=os.fstat(fd);synced.append((st.st_dev,st.st_ino));os.fsync(fd)
+ proxy.fsync=fsync_spy;ns['os']=proxy
+ child=root/'evidence';fd=ns['prepare_private_evidence_dir'](child,min_free_bytes=0)
+ try:
+  parent_stat=root.stat();child_stat=child.stat()
+  parent_synced=(parent_stat.st_dev,parent_stat.st_ino) in synced
+  child_synced=(child_stat.st_dev,child_stat.st_ino) in synced
+  assert child_synced and not parent_synced
+  add('new evidence directory parent durability',{'child_directory_fsynced':child_synced,'containing_directory_fsynced':parent_synced})
+ finally:os.close(fd)
+# Reproduce an append that writes a prefix and raises ENOSPC; do not fill any disk.
+with tempfile.TemporaryDirectory(prefix='reallocator-v8-torn-journal-text-') as tmp:
+ root=pathlib.Path(tmp);os.chmod(root,0o700)
+ for append_after_error in [False,True]:
+  ns=namespace();d=drive(ns);j,df=journal(ns,root,d,'torn-'+str(append_after_error));restores=[]
+  try:
+   j.append('RUN_START',{'mode':'EXECUTE'})
+   j.append('SETTING_MUTATION_INTENT',{'setting':'kernel_timeout','original':'30','target':'60'})
+   original_write=ns['write_all_bytes']
+   def partial_write(fd,data):
+    os.write(fd,b'{"event_type":');raise OSError(errno.ENOSPC,'mock failure after JSON prefix')
+   ns['write_all_bytes']=partial_write
+   try:j.append('WRITE_INTENT',{'offset_bytes':0,'attempt':1});raise AssertionError('append unexpectedly succeeded')
+   except OSError:pass
+   ns['write_all_bytes']=original_write
+   if append_after_error:
+    j.append('FATAL_ABORT',{'error':'mock append error'})
+    j.append('RUN_CLOSURE',{'exit_code':1})
+   try:j.reconcile_prior_records();raise AssertionError('torn journal accepted')
+   except ns['ReallocatorError'] as exc:startup_error=str(exc)
+   ns['assert_device_identity_and_capacity']=lambda *a:None
+   ns['restore_recovery_settings']=lambda *a,**kw:(restores.append('called') or [])
+   try:ns['reconcile_interrupted_journal_state'](d,0,j);raise AssertionError('torn journal recovered')
+   except ns['ReallocatorError'] as exc:recovery_error=str(exc)
+   assert 'Corrupted journal' in startup_error and 'Corrupted journal' in recovery_error and not restores
+   add('partial journal append; later appends='+str(append_after_error),{'startup_error':startup_error,'recovery_error':recovery_error,'restoration_calls':restores,'journal':pathlib.Path(j.path).read_text()})
+  finally:j.close();os.close(df)
 
 print(json.dumps({'syntax':out['syntax'],'cases':len(out['cases']),'source_sha256':out['source_sha256']},indent=2))

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SATA HDD Targeted Bad-Block Reallocator (v7 — Restartable Two-Phase Restoration Recovery Edition)
+SATA HDD Targeted Bad-Block Reallocator (v8 — Durable Corroboration & Qualification Edition)
 
 Scope & Explicit Operational Constraints:
   - Target: Unmounted, unused SATA HDDs (512n, 512e, 4Kn) whose contents are blank or expendable.
@@ -444,9 +444,6 @@ def replay_journal_state(
     Shared deterministic journal replay routine consumed by both normal preflight
     (`WriteAheadJournal.reconcile_prior_records`) and explicit recovery
     (`reconcile_interrupted_journal_state`).
-    Tracks both pending setting mutations and completed per-run setting restorations
-    so an interruption between SETTING_RESTORED and RESTORATION_STATE_RECONCILED remains
-    recoverable and verifiable.
     """
     state = JournalReplayState()
     if not raw_bytes:
@@ -616,6 +613,40 @@ def replay_journal_state(
                     "op_id": op_id,
                 }
 
+        elif ev_type == "RETRY_CORROBORATION_FAILED":
+            # v7 Low-Severity Finding Fix: Updates the operation-correlated unresolved
+            # attempt outcome with the durable corroboration classification and detail.
+            run_obj.had_write_activity = True
+            offset = int(rec["offset_bytes"])
+            attempt = int(rec["attempt"])
+            op = str(rec.get("operation", "pwritev_zero"))
+            op_id = str(rec.get("op_id", f"{rec_run_id}:{offset}:{attempt}:{op}"))
+            existing = state.unresolved_outcomes.get(offset)
+            if (
+                existing is None
+                or existing.get("run_id") != rec_run_id
+                or int(existing.get("attempt", -1)) != attempt
+                or str(existing.get("operation", "")) != op
+                or str(existing.get("op_id", "")) != op_id
+            ):
+                raise ReallocatorError(
+                    f"Orphan or mismatched RETRY_CORROBORATION_FAILED at line {line_no} "
+                    f"(run_id={rec_run_id!r}, offset=0x{offset:x}, attempt={attempt}, op={op!r}, op_id={op_id!r})."
+                )
+            corroborated_status = str(rec.get("status", "")).strip()
+            if not corroborated_status or corroborated_status in RESOLVED_TARGET_STATUSES:
+                raise ReallocatorError(
+                    f"Invalid status {corroborated_status!r} in RETRY_CORROBORATION_FAILED at line {line_no}."
+                )
+            state.unresolved_outcomes[offset] = {
+                **existing,
+                "prior_attempt_status": rec.get("prior_attempt_status", existing.get("status")),
+                "corroboration_verify_status": rec.get("corroboration_verify_status"),
+                "corroboration_verify_rc": rec.get("corroboration_verify_rc"),
+                "corroboration_detail": rec.get("corroboration_detail"),
+                "status": corroborated_status,
+            }
+
         elif ev_type == "OPERATION_RECONCILED":
             target_r_id = str(rec.get("target_run_id", ""))
             offset = int(rec["offset_bytes"])
@@ -706,11 +737,6 @@ def replay_journal_state(
 def resolve_outstanding_setting_baselines(
     replay: JournalReplayState,
 ) -> Tuple[Optional[str], List[str], Optional[Tuple[int, int]], List[str]]:
-    """
-    Phase A: Derives setting baselines for unclosed `pending_setting_mutations` that still
-    require active device restoration and `SETTING_RESTORED` logging.
-    Raises ReallocatorError if multiple unclosed runs have contradictory original values.
-    """
     timeout_originals: Set[str] = set()
     timeout_runs: List[str] = []
     erc_originals: Set[Tuple[int, int]] = set()
@@ -744,14 +770,6 @@ def resolve_reverification_setting_baselines(
     pending_t_base: Optional[str] = None,
     pending_e_base: Optional[Tuple[int, int]] = None,
 ) -> Tuple[Optional[str], Optional[Tuple[int, int]]]:
-    """
-    Phase B (v6 Review Finding Fix):
-    Derives setting baselines that were already logged as `SETTING_RESTORED` in a prior
-    interrupted recovery attempt, but belong to runs that still have unretired
-    `UNRESOLVED_RESTORATION_STATE` markers or open `interrupted_runs` entries.
-    Validates that every run with an `UNRESOLVED_RESTORATION_STATE` marker actually recorded
-    at least one setting mutation baseline, and rejects contradictions across Phase A and Phase B.
-    """
     for (r_id, _) in sorted(replay.unresolved_restoration_events.keys()):
         r_obj = replay.runs.get(r_id)
         if r_obj is None or not r_obj.setting_baselines:
@@ -1419,13 +1437,6 @@ def verify_live_restored_settings(
     expected_timeout: Optional[str],
     expected_erc: Optional[Tuple[int, int]],
 ) -> List[str]:
-    """
-    v6 Review Finding Fix:
-    Positively verifies target device identity and confirms that live settings on the device
-    match `expected_timeout` and `expected_erc` (for obligations whose `SETTING_RESTORED`
-    record was already committed prior to an interruption) before retiring any
-    `UNRESOLVED_RESTORATION_STATE` marker or interrupted recovery run.
-    """
     errors: List[str] = []
     if expected_timeout is None and expected_erc is None:
         return errors
@@ -2289,7 +2300,31 @@ def overwrite_and_verify_physical_sector(
             and v_recheck.sense_key.lower() == "medium error"
         )
         if not is_localized_medium_err:
-            attempt_history[-1]["status"] = f"EIO_OR_DEFECT_UNCORROBORATED_INDETERMINATE({v_recheck.detail})"
+            # v7 Low-Severity Finding Fix: Preserve the immediate attempt outcome and
+            # durably append an operation-correlated RETRY_CORROBORATION_FAILED record
+            # so returned status and replayed journal status match identically.
+            prior_status = attempt_history[-1]["status"]
+            corroborated_status = f"EIO_OR_DEFECT_UNCORROBORATED_INDETERMINATE({v_recheck.detail})"
+            corroboration_payload = {
+                "attempt": attempt,
+                "operation": op_name,
+                "op_id": op_id,
+                "offset_bytes": offset_bytes,
+                "start_lba": start_lba,
+                "end_lba": end_lba,
+                "prior_attempt_status": prior_status,
+                "corroboration_verify_status": f"{v_recheck.category}(rc={v_recheck.return_code})",
+                "corroboration_verify_rc": v_recheck.return_code,
+                "corroboration_detail": v_recheck.detail,
+                "status": corroborated_status,
+            }
+            attempt_history[-1]["prior_attempt_status"] = prior_status
+            attempt_history[-1]["corroboration_verify_status"] = corroboration_payload["corroboration_verify_status"]
+            attempt_history[-1]["corroboration_verify_rc"] = v_recheck.return_code
+            attempt_history[-1]["corroboration_detail"] = v_recheck.detail
+            attempt_history[-1]["status"] = corroborated_status
+            if journal is not None:
+                journal.append("RETRY_CORROBORATION_FAILED", corroboration_payload)
             break
 
         if pwrite_eio and enable_hdparm_fallback and drive.logical_bs == 512 and drive.physical_bs == 512:
@@ -2376,19 +2411,7 @@ def reconcile_interrupted_journal_state(
     journal: WriteAheadJournal,
 ) -> None:
     """
-    Restartable Two-Phase Reconciliation Procedure:
-      1. Positively verifies drive identity and capacity.
-      2. Derives Phase A pending setting mutations (`resolve_outstanding_setting_baselines`)
-         AND Phase B already-restored setting baselines belonging to runs with unretired
-         `UNRESOLVED_RESTORATION_STATE` or `interrupted_runs` (`resolve_reverification_setting_baselines`).
-      3. Restores any Phase A pending settings and logs `SETTING_RESTORED(target_run_id=...)`.
-      4. Positively verifies live hardware/sysfs values for any Phase B settings (`verify_live_restored_settings`)
-         before retiring `UNRESOLVED_RESTORATION_STATE` markers with `RESTORATION_STATE_RECONCILED`.
-      5. Inspects all unretired offsets (`pending_intents`, `unresolved_outcomes`,
-         `unresolved_confirmation_stops`) via `confirm_live_defect()`, failing closed if any
-         remains `INDETERMINATE`, and logs `OPERATION_RECONCILED`, `TARGET_RECONCILED`, and
-         `CONFIRMATION_STOP_RECONCILED`.
-      6. Logs `STATE_RECONCILED` with `reconciled_run_ids`.
+    Restartable Two-Phase Reconciliation Procedure.
     """
     assert_device_identity_and_capacity(drive, dev_fd)
     raw_bytes = read_all_bytes_from_fd(journal.fd)
@@ -2412,7 +2435,6 @@ def reconcile_interrupted_journal_state(
 
     journal.append("RUN_START", {"mode": "RECONCILE_INTERRUPTED_STATE", "limit_bytes": drive.size_bytes})
 
-    # Phase A: Actively restore any setting mutations that do not yet have a SETTING_RESTORED record
     if t_base is not None or e_base is not None:
         baseline_drive = dataclasses.replace(
             drive,
@@ -2435,8 +2457,6 @@ def reconcile_interrupted_journal_state(
         if restore_errs:
             raise ReallocatorError(f"Settings reconciliation failed: {'; '.join(restore_errs)}")
 
-    # Phase B: Positively verify live settings for any obligations whose SETTING_RESTORED record
-    # was already committed in an earlier interrupted recovery attempt
     check_live_t = reverify_t_base if t_base is None else None
     check_live_e = reverify_e_base if e_base is None else None
     if check_live_t is not None or check_live_e is not None:
@@ -2444,7 +2464,6 @@ def reconcile_interrupted_journal_state(
         if verify_errs:
             raise ReallocatorError(f"Live settings verification failed: {'; '.join(verify_errs)}")
 
-    # Retire UNRESOLVED_RESTORATION_STATE markers only after both Phase A and Phase B succeed
     for (r_id, seq_no) in sorted(replay.unresolved_restoration_events.keys()):
         journal.append(
             "RESTORATION_STATE_RECONCILED",
@@ -2570,7 +2589,7 @@ def print_ata_telemetry_report(before: AtaSmartSnapshot, after: AtaSmartSnapshot
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Hardened v7 SATA HDD bad-sector discovery and physical-sector zeroing utility."
+        description="Hardened v8 SATA HDD bad-sector discovery and physical-sector zeroing utility."
     )
     parser.add_argument("device", help="Whole-disk block node (e.g., /dev/sdX or /dev/disk/by-id/ata-...)")
     mode_grp = parser.add_mutually_exclusive_group()
